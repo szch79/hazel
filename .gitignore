@@ -1,0 +1,13 @@
+# MacOS
+.DS_Store
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Lean
+.lake
+.cache
+
+Playground
