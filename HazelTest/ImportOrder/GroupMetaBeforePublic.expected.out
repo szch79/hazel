@@ -1,0 +1,3 @@
+HazelTest/ImportOrder/GroupMetaBeforePublic.lean:9:0: warning: public imports should come before meta imports.
+
+Note: This linter can be disabled with `set_option linter.hazel.header.importGroupOrder false`

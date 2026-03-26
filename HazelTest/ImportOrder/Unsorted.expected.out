@@ -1,0 +1,6 @@
+HazelTest/ImportOrder/Unsorted.lean:10:0: warning: Import `Init.Data.Array.Basic` should come before `Init.Data.List.Basic`.
+
+Note: This linter can be disabled with `set_option linter.hazel.header.sortedImports false`
+Sort imports:
+  [apply] import Init.Data.Array.Basic
+  import Init.Data.List.Basic

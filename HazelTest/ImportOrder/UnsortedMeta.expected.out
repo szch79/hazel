@@ -1,0 +1,6 @@
+HazelTest/ImportOrder/UnsortedMeta.lean:8:0: warning: Import `Hazel` should come before `Init.Core`.
+
+Note: This linter can be disabled with `set_option linter.hazel.header.sortedImports false`
+Sort imports:
+  [apply] meta import Hazel
+  meta import Init.Core

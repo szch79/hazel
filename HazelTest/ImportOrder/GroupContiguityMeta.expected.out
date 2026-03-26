@@ -1,0 +1,3 @@
+HazelTest/ImportOrder/GroupContiguityMeta.lean:9:0: warning: meta imports should be contiguous (group is split).
+
+Note: This linter can be disabled with `set_option linter.hazel.header.importGroupContiguity false`

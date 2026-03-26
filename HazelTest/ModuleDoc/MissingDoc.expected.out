@@ -1,0 +1,3 @@
+HazelTest/ModuleDoc/MissingDoc.lean:13:0: warning: Missing module docstring.  Please add a `/-! ... -/` comment after the imports.
+
+Note: This linter can be disabled with `set_option linter.hazel.header.moduleDoc false`
