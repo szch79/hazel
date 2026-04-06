@@ -199,6 +199,32 @@ def vn_fail_lambda_ann : MyFormula → Bool := fun (x : MyFormula) => true
 #guard_msgs in
 def vn_pass_lambda_underscore : MyWorld → Bool := fun _ => true
 
+/-! ### Universe-polymorphic types in `suggest_var_names` -/
+
+-- Regression test: `suggest_var_names` for types whose elaboration produces
+-- universe metavariables (e.g., `Finset Nat`).  Previously the linter crashed
+-- with "unknown universe metavariable" because the stored Expr contained
+-- uninstantiated universe metavars.
+
+suggest_var_names "S" "T" for Array Nat
+
+-- Passing: S matches
+#guard_msgs in
+def vn_pass_array_rule (S : Array Nat) : Nat := S.size
+
+-- Failing: x doesn't match
+/--
+warning: Suggested names of type `Array Nat`: S T
+
+Note: This linter can be disabled with `set_option linter.hazel.style.varNaming false`
+-/
+#guard_msgs in
+def vn_fail_array_rule (x : Array Nat) : Nat := x.size
+
+-- The linter must not crash on subsequent declarations in the same file.
+#guard_msgs in
+def vn_pass_after_finset_rule (n : Nat) : Nat := n + 1
+
 end varNaming
 
 /-! # Parameter Naming -/
