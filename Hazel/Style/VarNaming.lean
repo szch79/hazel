@@ -113,7 +113,9 @@ syntax "suggest_var_names" str+ "for" term : command
 
 elab_rules : command
   | `(suggest_var_names $prefixes:str* for $ty) => do
-    let tyExpr ← liftTermElabM <| Term.elabType ty
+    let tyExpr ← liftTermElabM do
+      let e ← Term.elabType ty
+      instantiateMVars e
     let ps := prefixes.map (·.getString)
     if ps.isEmpty then
       throwError "suggest_var_names requires at least one prefix string"
