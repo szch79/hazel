@@ -948,7 +948,7 @@ warning: `True` could be an explicit argument instead.
 Note: This linter can be disabled with `set_option linter.hazel.style.preferBinder false`
 -/
 #guard_msgs in
-def pb_fail_mixed_arrows : Nat → True → True := fun _ h => h
+theorem pb_fail_mixed_arrows : Nat → True → True := fun _ h => h
 
 -- Edge: abbrev with Prop arrow
 /--
@@ -1134,7 +1134,7 @@ theorem ri2_pass_dependent_forall
 
 -- Passing at level 2: another dependent forall
 #guard_msgs in
-def ri2_pass_dependent_pred {P : (n : Nat) → n > 0 → Prop}
+theorem ri2_pass_dependent_pred {P : (n : Nat) → n > 0 → Prop}
     (h : P 1 (by omega)) : True := trivial
 
 -- Passing at level 2: predicate over multiple typed args with dependencies
@@ -1447,7 +1447,7 @@ warning: `g` is declared before `f` but used later.  Consider reordering.
 Note: This linter can be disabled with `set_option linter.hazel.style.paramOrder false`
 -/
 #guard_msgs in
-def ao_fail_clear_order (g : Nat → Nat) (f : Nat → Nat) (h1 : f 0 = 0) (h2 : g 0 = 0) : True :=
+theorem ao_fail_clear_order (g : Nat → Nat) (f : Nat → Nat) (h1 : f 0 = 0) (h2 : g 0 = 0) : True :=
   trivial
 
 -- Failing: R (Type) before v (Var) — R used much later
