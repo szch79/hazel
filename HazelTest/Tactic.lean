@@ -75,6 +75,48 @@ Note: This linter can be disabled with `set_option linter.hazel.tactic.redundant
 #guard_msgs in
 example : (0 : Nat) + 1 = 1 := by simp_all [my_simp_lemma]
 
+-- Passing: erasure arg — `-foo` is only meaningful when `foo` IS `@[simp]`
+set_option linter.unusedSimpArgs false in
+#guard_msgs in
+example : (0 : Nat) + 1 = 1 := by simp [-my_simp_lemma]
+
+-- Failing: erasure alongside a redundant positive arg — only the positive one flagged
+set_option linter.unusedSimpArgs false in
+/--
+warning: Redundant simp argument: `my_simp_lemma` is already `@[simp]`.
+
+Note: This linter can be disabled with `set_option linter.hazel.tactic.redundantSimpArg false`
+-/
+#guard_msgs in
+example : (0 : Nat) + 1 = 1 := by simp [my_simp_lemma, -Nat.add_zero]
+
+-- Passing: `at` location naming a hyp that shadows a global `@[simp]` name
+set_option linter.unusedSimpArgs false in
+#guard_msgs in
+example (h : 1 + 1 = 2) (my_simp_lemma : (0 : Nat) + 1 = 1) : True := by
+  simp [h] at my_simp_lemma
+  trivial
+
+def myDouble (n : Nat) : Nat := n + n
+@[simp] theorem myDouble_eq (n : Nat) : myDouble n = n + n := rfl
+
+-- Passing: reversal idiom `simp [-foo, ← foo]` — the reversed rewrite is not
+-- in the default set, so the arg is not redundant (erasure must come first:
+-- erasing is name-keyed and would drop an already-added reversed copy too)
+set_option linter.unusedSimpArgs false in
+#guard_msgs in
+example (n : Nat) : n + n = myDouble n := by simp [-myDouble_eq, ← myDouble_eq]
+
+-- Passing: `↓ foo` changes rewrite timing (pre instead of post)
+set_option linter.unusedSimpArgs false in
+#guard_msgs in
+example (n : Nat) : myDouble n = n + n := by simp [↓ myDouble_eq]
+
+-- Passing: `↑ foo` skipped as a modifier (documented false-negative tradeoff)
+set_option linter.unusedSimpArgs false in
+#guard_msgs in
+example (n : Nat) : myDouble n = n + n := by simp [↑ myDouble_eq]
+
 -- Passing: linter disabled
 set_option linter.hazel.tactic.redundantSimpArg false in
 set_option linter.unusedSimpArgs false in

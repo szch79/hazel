@@ -15,6 +15,16 @@ argument is redundant since `simp` fires it from the default set anyway.
 
 `simp only` is not flagged: it is a deliberate choice for controlled
 simplification, and plain `simp` may over-simplify and break the proof.
+
+Only positive lemma args (`simpLemma` nodes) are checked.  Erasures
+(`simp [-foo]`) are skipped — `-foo` is only meaningful when `foo` *is*
+`@[simp]` — as are the location clause (`at h`) and config.
+
+Args with a modifier are also skipped: `← foo` supplies the *reversed*
+rewrite and `↓ foo` (or `↑ foo`) changes *when* it fires, neither of which
+the default registration provides, so such args are not redundant.  This
+trades a rare false negative (`↑ foo` on a plainly-registered `foo`) for
+never mislabeling a deliberate direction or timing change.
 -/
 
 meta section
@@ -40,6 +50,20 @@ private partial def collectIdents (stx : Syntax) (acc : Array Name := #[]) : Arr
   | .node _ _ args => args.foldl (init := acc) fun acc arg => collectIdents arg acc
   | _ => acc
 
+/-- Collect ident names from the positive simp args (`simpLemma` nodes) only,
+skipping erasures (`-foo`), the location clause, and config.  A `simpLemma`
+with a modifier (slot 0: `↑`/`↓`, slot 1: `←`, mirroring core's
+`elabSimpArgs`) is skipped too: it changes direction or timing relative to
+the default registration, so it is not redundant. -/
+private partial def collectSimpArgIdents (stx : Syntax) (acc : Array Name := #[]) : Array Name :=
+  match stx with
+  | .node _ kind args =>
+    if kind == ``Lean.Parser.Tactic.simpLemma then
+      if stx[0].isNone && stx[1].isNone then collectIdents stx acc else acc
+    else
+      args.foldl (init := acc) fun acc arg => collectSimpArgIdents arg acc
+  | _ => acc
+
 /-- Check a single syntax node for redundant simp args. -/
 private partial def findRedundantSimpArgs
     (simps : SimpTheorems) (stx : Syntax) :
@@ -51,11 +75,10 @@ private partial def findRedundantSimpArgs
     if isSimpCall then
       -- Skip `simp only`: deliberate controlled simplification.
       let isOnly := (stx.find? fun s => s.getAtomVal == "only").isSome
-      let hasArgs := (stx.find? fun s => s.getAtomVal == "[").isSome
-      if hasArgs && !isOnly then
-        let names := collectIdents stx
+      if !isOnly then
+        let names := collectSimpArgIdents stx
         for name in names do
-          if name.isAnonymous || name == `simp || name == `simp_all then continue
+          if name.isAnonymous then continue
           let resolved? ← liftCoreM <|
             try pure (some (← resolveGlobalConstNoOverload (mkIdent name)))
             catch _ => pure none
