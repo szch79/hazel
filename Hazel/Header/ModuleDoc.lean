@@ -38,7 +38,11 @@ def moduleDocLinter : Lean.Linter where run := withSetOptionIn fun stx => do
   if (← MonadState.get).messages.hasErrors then return
   let fm ← getFileMap
   let env ← getEnv
-  let mdDocs := (getMainModuleDoc env).toArray
+  -- Module docs land in different environment extensions depending on their
+  -- format: Markdown in `getMainModuleDoc`, Verso (under `doc.verso.module`)
+  -- in `getMainVersoModuleDocs`.  Collect source ranges from both.
+  let docRanges := (getMainModuleDoc env).toArray.map (·.declarationRange) ++
+    (getMainVersoModuleDocs env).snippets.toArray.map (·.declarationRange)
   -- Parse header to find where imports end
   let fil ← getFileName
   let (hdrStx, _) ← Parser.parseHeader
@@ -48,24 +52,26 @@ def moduleDocLinter : Lean.Linter where run := withSetOptionIn fun stx => do
   let afterImports : Substring.Raw :=
     { str := fm.source, startPos := hdrEndPos, stopPos := fm.source.rawEndPos }
   if isOnlyWhitespace afterImports.toString then return
-  if mdDocs.isEmpty then
+  if docRanges.isEmpty then
     -- No module docstring anywhere in the file.
     Linter.logLint linter.hazel.header.moduleDoc stx
       m!"Missing module docstring.  Please add a `/-! ... -/` comment after the imports."
   else
     -- There is a module docstring.  Check it's the first thing after imports.
-    if let some firstDoc := mdDocs[0]? then
-      let docStartPos := fm.ofPosition firstDoc.declarationRange.pos
-      -- Extract text between end of imports and start of first module doc.
-      -- If there's any non-whitespace content, something comes before the doc.
-      if docStartPos > hdrEndPos then
-        -- Extract text between end of imports and start of first module doc.
-        let between : Substring.Raw := { str := fm.source, startPos := hdrEndPos, stopPos := docStartPos }
-        unless isOnlyWhitespace between.toString do
-          -- Find the first non-whitespace position for better error location
-          Linter.logLint linter.hazel.header.moduleDoc stx
-            m!"Module docstring should be the first command after imports.  \
-               Other commands appear before `/-! ... -/`."
+    -- Mixing formats is an elaboration error, so the earliest range across
+    -- both stores is the first module doc in the file.
+    let mut docStartPos := fm.source.rawEndPos
+    for r in docRanges do
+      let p := fm.ofPosition r.pos
+      if p < docStartPos then docStartPos := p
+    -- Extract text between end of imports and start of first module doc.
+    -- If there's any non-whitespace content, something comes before the doc.
+    if docStartPos > hdrEndPos then
+      let between : Substring.Raw := { str := fm.source, startPos := hdrEndPos, stopPos := docStartPos }
+      unless isOnlyWhitespace between.toString do
+        Linter.logLint linter.hazel.header.moduleDoc stx
+          m!"Module docstring should be the first command after imports.  \
+             Other commands appear before `/-! ... -/`."
 
 initialize addLinter moduleDocLinter
 

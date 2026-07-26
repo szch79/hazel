@@ -1,0 +1,12 @@
+HazelTest/ModuleDoc/VersoDoc.lean:25:0: warning: Nothing should precede `-/` on its line.
+
+Note: This linter can be disabled with `set_option linter.hazel.docstring.multilineFormat false`
+HazelTest/ModuleDoc/VersoDoc.lean:31:0: warning: Module docstrings should start with an uppercase letter.
+
+Note: This linter can be disabled with `set_option linter.hazel.docstring.capitalStart false`
+HazelTest/ModuleDoc/VersoDoc.lean:34:0: warning: Use two spaces after sentence-ending punctuation in module docstrings.
+
+Note: This linter can be disabled with `set_option linter.hazel.docstring.doubleSpace false`
+HazelTest/ModuleDoc/VersoDoc.lean:37:0: warning: Avoid non-ASCII characters in module docstring prose.
+
+Note: This linter can be disabled with `set_option linter.hazel.docstring.noUnicodeProse false`

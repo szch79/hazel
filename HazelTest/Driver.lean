@@ -16,6 +16,11 @@ import header, before any command runs.
 Mirrors the Lean stdlib `tests/lean/test_single.sh` pattern, adapted to
 run as a `lake_exe` test driver.
 
+A fixture may declare extra `lean` CLI arguments on a line of the form
+`-- lean-args: -D some.option=true`.  This is for options that must be set
+before parsing begins (e.g. `doc.verso`), which an in-file `set_option`
+cannot express without itself becoming a command in the file.
+
 Usage:
 - `lake test`                   — diff mode; nonzero exit on any mismatch
 - `lake exe hazelTest --update` — rewrite `.expected.out` files from current output
@@ -63,6 +68,15 @@ def discover : IO (Array Fixture) := do
   -- Stable order for deterministic diffs.
   return out.qsort (fun a b => a.src.toString < b.src.toString)
 
+/-- Extract extra `lean` CLI arguments from a fixture's `-- lean-args:` line. -/
+def fixtureArgs (src : System.FilePath) : IO (Array String) := do
+  let content ← IO.FS.readFile src
+  for line in content.splitOn "\n" do
+    if let some rest := line.trimAscii.toString.dropPrefix? "-- lean-args: " then
+      return rest.toString.splitOn " " |>.filterMap (fun a =>
+        if a.isEmpty then none else some a) |>.toArray
+  return #[]
+
 /-- Run one fixture through the `lean` binary and capture its diagnostics.
 
 Mirrors the Lean stdlib `tests/lean/test_single.sh` pattern.  We spawn
@@ -72,7 +86,7 @@ populated `ModuleSetup.importArts`, which the `lean` shell builds from
 its `--setup` flag but third-party callers can't easily reconstruct. -/
 def runFixture (f : Fixture) : IO String := do
   let out ← IO.Process.output {
-    cmd := "lean", args := #["--", f.src.toString]
+    cmd := "lean", args := (← fixtureArgs f.src) ++ #["--", f.src.toString]
   }
   return out.stdout ++ out.stderr
 

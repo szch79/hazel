@@ -1,0 +1,3 @@
+HazelTest/ModuleDoc/VersoAfterSetOption.lean:20:0: warning: Module docstring should be the first command after imports.  Other commands appear before `/-! ... -/`.
+
+Note: This linter can be disabled with `set_option linter.hazel.header.moduleDoc false`

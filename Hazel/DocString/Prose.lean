@@ -102,6 +102,18 @@ public def getDocComments : Syntax → Array Syntax
       args.flatMap getDocComments
   | _ => #[]
 
+/--
+Extract the body text (between the delimiters) of a `docComment` or
+`moduleDoc` node: both kinds have a 3-byte opener and a 2-byte closer.  The
+text is extracted from source positions rather than the syntax tree: with
+`doc.verso`, the body parses into a markup tree that does not round-trip to
+the source text (and `getDocStringText` throws on it).
+-/
+public def docBodyText? (stx : Syntax) : Option String := do
+  let ss ← stx.getSubstring? (withLeading := false) (withTrailing := false)
+  return { ss with startPos := ss.startPos.offsetBy ⟨3⟩,
+                   stopPos := ss.stopPos.unoffsetBy ⟨2⟩ }.toString
+
 /-! ## Linter -/
 
 /-- The docstring prose linter. -/
@@ -115,9 +127,7 @@ def proseLinter : Lean.Linter where run := withSetOptionIn fun stx => do
   let allowedChars ← allowedUnicodeRef.get
   -- Check all docstrings (declarations, syntax, macro, etc.)
   for docStx in getDocComments stx do
-    let some _ := docStx.getPos? | continue
-    if docStx.isMissing then continue
-    let docString ← try getDocStringText ⟨docStx⟩ catch _ => continue
+    let some docString := docBodyText? docStx | continue
     if docString.trimAscii.isEmpty then continue
     if chkDouble && hasSingleSpaceViolation docString then
       Linter.logLint linter.hazel.docstring.doubleSpace docStx
@@ -130,13 +140,7 @@ def proseLinter : Lean.Linter where run := withSetOptionIn fun stx => do
         m!"Docstrings should start with an uppercase letter."
   -- Check module docstrings
   if stx.isOfKind ``Parser.Command.moduleDoc then
-    let body := stx[1]
-    let docString := match body with
-      | .atom _ val => String.Pos.Raw.extract val 0 (val.rawEndPos.unoffsetBy ⟨2⟩)
-      | .node _ _ _ => match body[0] with
-        | .atom _ val => String.Pos.Raw.extract val 0 (val.rawEndPos.unoffsetBy ⟨2⟩)
-        | _ => ""
-      | _ => ""
+    let some docString := docBodyText? stx | return
     if docString.trimAscii.isEmpty then return
     if chkDouble && hasSingleSpaceViolation docString then
       Linter.logLint linter.hazel.docstring.doubleSpace stx

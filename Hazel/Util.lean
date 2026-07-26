@@ -28,6 +28,15 @@ public partial def getImports (s : Syntax) : Array Syntax :=
   let rest : Array Syntax := (s.getArgs.map getImports).flatten
   if s.isOfKind `Lean.Parser.Module.import then rest.push s else rest
 
+/--
+Extract the exact source text spanned by a syntax node.  Unlike
+`Syntax.reprint`, this is faithful for docstrings parsed with `doc.verso`,
+whose syntax tree tokens do not round-trip to the source text, and it
+excludes trailing trivia.
+-/
+public def sourceText? (stx : Syntax) : Option String :=
+  stx.getSubstring? (withLeading := false) (withTrailing := false) |>.map (·.toString)
+
 /-! ## Docstring span-aware iteration
 
 Utilities for iterating over prose characters in docstrings, skipping

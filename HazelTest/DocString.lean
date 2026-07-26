@@ -324,6 +324,142 @@ def ds_pass_delimiters_in_body := true
 
 end edgeCases
 
+/-! # doc.verso docstrings -/
+
+section versoDocstrings
+set_option doc.verso true
+
+section
+set_option linter.hazel.docstring.multilineFormat true
+
+-- Regression: `Syntax.reprint` on a Verso docstring is not source-faithful
+-- (its body is a markup tree), which made well-formed docstrings fail the
+-- closing-delimiter check.
+#guard_msgs in
+/--
+This is properly formatted.
+Multiple lines are fine.
+
+Even a second paragraph is fine.
+-/
+def ds_verso_pass_multiline := true
+
+#guard_msgs in
+/-- Single line is fine. -/
+def ds_verso_pass_single := true
+
+/--
+warning: Nothing should follow the opening delimiter on its line.
+
+Note: This linter can be disabled with `set_option linter.hazel.docstring.multilineFormat false`
+-/
+#guard_msgs in
+/-- This text follows
+the opening delimiter.
+-/
+def ds_verso_fail_text_after_open := true
+
+end
+
+section
+set_option linter.hazel.docstring.collapsible true
+
+/--
+warning: Single-line docstring should use `/-- ... -/` format.
+
+Note: This linter can be disabled with `set_option linter.hazel.docstring.collapsible false`
+-/
+#guard_msgs in
+/--
+This could be one line.
+-/
+def ds_verso_fail_collapsible := true
+
+#guard_msgs in
+/--
+First line.
+Second line.
+-/
+def ds_verso_pass_not_collapsible := true
+
+end
+
+section
+-- Regression: `getDocStringText` throws on Verso docstrings, which silently
+-- disabled all prose checks under `doc.verso`.
+set_option linter.hazel.docstring.doubleSpace true
+set_option linter.hazel.docstring.capitalStart true
+
+#guard_msgs in
+/-- This is a sentence.  This is another. -/
+def ds_verso_pass_prose := true
+
+/--
+warning: Use two spaces after sentence-ending punctuation in docstrings.
+
+Note: This linter can be disabled with `set_option linter.hazel.docstring.doubleSpace false`
+-/
+#guard_msgs in
+/-- This is a sentence. This is another. -/
+def ds_verso_fail_single_space := true
+
+/--
+warning: Docstrings should start with an uppercase letter.
+
+Note: This linter can be disabled with `set_option linter.hazel.docstring.capitalStart false`
+-/
+#guard_msgs in
+/-- this starts lowercase. -/
+def ds_verso_fail_lowercase := true
+
+end
+
+section
+set_option linter.hazel.docstring.noUnicodeProse true
+-- Verso emits "Code element could be more specific" hints for backtick code
+-- elements; disable them so the guards only capture linter output.
+set_option doc.verso.suggestions false
+
+#guard_msgs in
+/-- The term `φ` is a formula. -/
+def ds_verso_pass_unicode_backtick := true
+
+/--
+warning: Avoid non-ASCII characters in docstring prose; use backtick spans for code.
+
+Note: This linter can be disabled with `set_option linter.hazel.docstring.noUnicodeProse false`
+-/
+#guard_msgs in
+/-- The formula φ is valid. -/
+def ds_verso_fail_unicode_prose := true
+
+end
+
+section
+-- Regression: docstring presence must be detected structurally; a Verso
+-- docstring counts as documented.
+set_option linter.hazel.docstring.missingDocstring true
+
+#guard_msgs in
+/-- A documented definition under Verso. -/
+def ds_verso_md_pass := true
+
+/--
+warning: Public declaration is missing a docstring.
+
+Note: This linter can be disabled with `set_option linter.hazel.docstring.missingDocstring false`
+-/
+#guard_msgs in
+def ds_verso_md_fail := true
+
+end
+
+-- Module docstrings under Verso cannot be tested here: a file cannot mix
+-- Verso-format module docs with the Markdown-format ones used throughout
+-- this file.  See the `HazelTest/ModuleDoc/VersoDoc.lean` fixture.
+
+end versoDocstrings
+
 /-! # missingDocstring -/
 
 section missingDocstring

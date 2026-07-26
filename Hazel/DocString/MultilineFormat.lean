@@ -33,6 +33,7 @@ public register_option linter.hazel.docstring.collapsible : Bool := {
 
 namespace Hazel.DocString.MultilineFormat
 
+open Hazel.Util (sourceText?)
 open Hazel.DocString.Prose (getDocComments)
 
 /-- Check multi-line docstring format.  Returns `none` if OK, or a message string if violated. -/
@@ -73,29 +74,21 @@ def multilineFormatLinter : Lean.Linter where run := withSetOptionIn fun stx => 
   let chkCollapse := getLinterValue linter.hazel.docstring.collapsible opts
   unless chkFormat || chkCollapse do return
   if (← MonadState.get).messages.hasErrors then return
-  for docStx in getDocComments stx do
-    let some _ := docStx.getPos? | continue
-    if docStx.isMissing then continue
-    let raw := docStx.reprint.getD ""
+  -- Module docstrings (`/-! ... -/`) have no inner `docComment` node; the
+  -- command syntax itself is the docstring.
+  let docs := getDocComments stx ++
+    (if stx.isOfKind ``Parser.Command.moduleDoc then #[stx] else #[])
+  for docStx in docs do
+    -- Use source positions to extract the exact `/-- ... -/` text.
+    -- `Syntax.reprint` includes trailing trivia (whitespace, next-line
+    -- content) and is not source-faithful for `doc.verso` docstrings, which
+    -- breaks the delimiter checks.
+    let some raw := sourceText? docStx | continue
     if chkFormat then
       if let some msg := checkMultilineFormat raw then
         Linter.logLint linter.hazel.docstring.multilineFormat docStx m!"{msg}"
     if chkCollapse && isCollapsible raw then
       Linter.logLint linter.hazel.docstring.collapsible docStx
-        m!"Single-line docstring should use `/-- ... -/` format."
-  if stx.isOfKind ``Parser.Command.moduleDoc then
-    -- Use source positions to extract the exact `/-! ... -/` text.
-    -- `stx.reprint` includes trailing trivia (whitespace, next-line content)
-    -- which breaks the last-line check.
-    let fm ← getFileMap
-    let some startPos := stx.getPos? | return
-    let some endPos := stx.getTailPos? | return
-    let raw := { str := fm.source, startPos, stopPos := endPos : Substring.Raw }.toString
-    if chkFormat then
-      if let some msg := checkMultilineFormat raw then
-        Linter.logLint linter.hazel.docstring.multilineFormat stx m!"{msg}"
-    if chkCollapse && isCollapsible raw then
-      Linter.logLint linter.hazel.docstring.collapsible stx
         m!"Single-line docstring should use `/-- ... -/` format."
 
 initialize addLinter multilineFormatLinter
