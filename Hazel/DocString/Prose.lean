@@ -24,13 +24,16 @@ open Lean Elab Command Linter Hazel.Util
 
 /-! ## Options -/
 
-/-- Two spaces after sentence-ending punctuation (`.`, `!`, `?`). -/
+/--
+Two spaces after sentence-ending punctuation (`.`, `!`, `?`).  URLs are
+exempt: punctuation in or right after a URL may be part of the URL itself.
+-/
 public register_option linter.hazel.docstring.doubleSpace : Bool := {
   defValue := false
   descr := "check for two spaces after sentence-ending punctuation in docstrings"
 }
 
-/-- No non-ASCII characters in prose (backtick spans and `$...$` math excluded). -/
+/-- No non-ASCII characters in prose (backtick spans, `$...$` math, and URLs excluded). -/
 public register_option linter.hazel.docstring.noUnicodeProse : Bool := {
   defValue := false
   descr := "check for non-ASCII characters in docstring prose"
@@ -79,12 +82,19 @@ private def hasUnicodeProseViolation (s : String) (allowed : Array Char) : Bool 
   (forProse s fun _ c _ =>
     if c.val > 127 && !allowed.contains c then some () else none).isSome
 
-/-- Check that the first non-whitespace character is uppercase or a backtick. -/
+/-- Check that the first non-whitespace character is uppercase, a backtick, or starts a URL. -/
 private def hasCapitalStartViolation (s : String) : Bool := Id.run do
-  for c in s.toList do
-    if c == ' ' || c == '\n' || c == '\r' || c == '\t' then continue
+  let chars := s.toList.toArray
+  let mut i := 0
+  while i < chars.size do
+    let c := chars[i]!
+    if c == ' ' || c == '\n' || c == '\r' || c == '\t' then
+      i := i + 1
+      continue
     -- '`' for code spans, '#' for markdown headers (# Section)
     if c == '`' || c == '#' || c.isUpper then return false
+    -- A URL is not prose; no capitalization to demand.
+    if (skipUrlSpan? chars i).isSome then return false
     return true
   return false
 

@@ -35,3 +35,7 @@ def versoBadCloser := true
 
 -- Unicode in module doc prose: noUnicodeProse warning.
 /-! The formula φ appears in module prose. -/
+
+-- URL in module doc prose: sentence punctuation adjacent to a URL is part
+-- of the URL span, so no doubleSpace warning.
+/-! See https://example.com/spec. Section two has details. -/

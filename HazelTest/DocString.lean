@@ -42,6 +42,22 @@ A list:
 -/
 def ds_pass_numbered_list := true
 
+-- URLs are not prose: a sentence-ending period after a URL cannot be
+-- distinguished from a period inside the URL, so no check fires there.
+#guard_msgs in
+/-- See https://example.com/spec. Section two has details. -/
+def ds_pass_url := true
+
+-- A violation elsewhere in the prose is still caught.
+/--
+warning: Use two spaces after sentence-ending punctuation in docstrings.
+
+Note: This linter can be disabled with `set_option linter.hazel.docstring.doubleSpace false`
+-/
+#guard_msgs in
+/-- See https://example.com/spec. Details follow. Second sentence. -/
+def ds_fail_url_elsewhere := true
+
 end doubleSpace
 
 /-! # noUnicodeProse -/
@@ -146,6 +162,11 @@ def ds_fail_after_triple_backtick := true
 /-- We use `φ` in code and $ψ$ in math. -/
 def ds_pass_mixed_spans := true
 
+-- Unicode inside a URL is fine (IRIs may contain non-ASCII).
+#guard_msgs in
+/-- See https://example.com/φ-notes for details. -/
+def ds_pass_unicode_url := true
+
 end noUnicodeProse
 
 /-! # capitalStart -/
@@ -160,6 +181,11 @@ def ds_pass_capital := true
 #guard_msgs in
 /-- `foo` is a function. -/
 def ds_pass_backtick_start := true
+
+-- A URL is not prose; no capitalization to demand.
+#guard_msgs in
+/-- https://example.com hosts the project page. -/
+def ds_pass_url_start := true
 
 /--
 warning: Docstrings should start with an uppercase letter.
@@ -411,6 +437,11 @@ Note: This linter can be disabled with `set_option linter.hazel.docstring.capita
 #guard_msgs in
 /-- this starts lowercase. -/
 def ds_verso_fail_lowercase := true
+
+-- URLs are not prose; the period after the URL does not trigger doubleSpace.
+#guard_msgs in
+/-- See https://example.com/spec. Section two has details. -/
+def ds_verso_pass_url := true
 
 end
 

@@ -41,7 +41,7 @@ public def sourceText? (stx : Syntax) : Option String :=
 
 Utilities for iterating over prose characters in docstrings, skipping
 backtick code spans (with correct count matching), escaped characters,
-and `$`/`$$` math spans.
+`$`/`$$` math spans, and URLs.
 -/
 
 /--
@@ -85,9 +85,31 @@ public def skipMathSpan (chars : Array Char) (i : Nat) : Nat := Id.run do
   return j
 
 /--
+If a URL starts at index `i`, return the index after it; otherwise `none`.
+A URL is an RFC 3986 scheme (a letter followed by letters, digits, `+`, `-`,
+or `.`) followed by `://`, extending to the next whitespace character.
+Trailing punctuation deliberately belongs to the span: RFC 3986 allows
+sentence-ending characters such as `.` and `?` in URLs, so punctuation
+adjacent to a URL cannot be reliably attributed to the surrounding prose.
+-/
+public def skipUrlSpan? (chars : Array Char) (i : Nat) : Option Nat := Id.run do
+  let len := chars.size
+  unless i < len && (chars[i]!).isAlpha do return none
+  let mut j := i + 1
+  while j < len && ((chars[j]!).isAlphanum || chars[j]! == '+' ||
+      chars[j]! == '-' || chars[j]! == '.') do
+    j := j + 1
+  unless j + 2 < len && chars[j]! == ':' && chars[j + 1]! == '/' && chars[j + 2]! == '/' do
+    return none
+  j := j + 3
+  while j < len && !(chars[j]!).isWhitespace do
+    j := j + 1
+  return some j
+
+/--
 Iterate over prose characters in a docstring, skipping code spans, math spans,
-and escaped characters.  Calls `f` with `(index, char, chars)` for each prose
-character.  Returns `some a` on the first `f` that returns `some`.
+URLs, and escaped characters.  Calls `f` with `(index, char, chars)` for each
+prose character.  Returns `some a` on the first `f` that returns `some`.
 -/
 public def forProse (s : String) (f : Nat → Char → Array Char → Option α) :
     Option α := Id.run do
@@ -104,6 +126,9 @@ public def forProse (s : String) (f : Nat → Char → Array Char → Option α)
       continue
     if c == '$' then
       i := skipMathSpan chars i
+      continue
+    if let some j := skipUrlSpan? chars i then
+      i := j
       continue
     if let some result := f i c chars then
       return some result
