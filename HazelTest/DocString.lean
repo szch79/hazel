@@ -58,6 +58,36 @@ Note: This linter can be disabled with `set_option linter.hazel.docstring.double
 /-- See https://example.com/spec. Details follow. Second sentence. -/
 def ds_fail_url_elsewhere := true
 
+-- Markdown link labels are not prose: citation-style labels contain
+-- initials and abbreviations.
+#guard_msgs in
+/-- See [A. Author, *On a generic topic*][author99] for background. -/
+def ds_pass_link_label := true
+
+-- An inline link target is skipped along with its label.
+#guard_msgs in
+/-- Read [the D. Knuth interview](https://example.com/interview) today. -/
+def ds_pass_inline_link := true
+
+-- Reference-style definitions: bracketed label, then a URL.
+#guard_msgs in
+/--
+Details in [E. Writer, *A survey*][writer00].
+
+[writer00]: https://example.com/survey
+-/
+def ds_pass_link_reference := true
+
+-- Prose after a link is still checked.
+/--
+warning: Use two spaces after sentence-ending punctuation in docstrings.
+
+Note: This linter can be disabled with `set_option linter.hazel.docstring.doubleSpace false`
+-/
+#guard_msgs in
+/-- See [A. Author, *Title*][a99] for this. Also for that. -/
+def ds_fail_link_then_prose := true
+
 end doubleSpace
 
 /-! # noUnicodeProse -/
@@ -167,6 +197,11 @@ def ds_pass_mixed_spans := true
 /-- See https://example.com/φ-notes for details. -/
 def ds_pass_unicode_url := true
 
+-- Unicode inside a link label is fine.
+#guard_msgs in
+/-- See [Kőnig's theorem][k36] for the bipartite case. -/
+def ds_pass_unicode_link := true
+
 end noUnicodeProse
 
 /-! # capitalStart -/
@@ -186,6 +221,11 @@ def ds_pass_backtick_start := true
 #guard_msgs in
 /-- https://example.com hosts the project page. -/
 def ds_pass_url_start := true
+
+-- Likewise for a leading markdown link.
+#guard_msgs in
+/-- [a-tool guide](https://example.com/guide) covers the setup. -/
+def ds_pass_link_start := true
 
 /--
 warning: Docstrings should start with an uppercase letter.
@@ -442,6 +482,11 @@ def ds_verso_fail_lowercase := true
 #guard_msgs in
 /-- See https://example.com/spec. Section two has details. -/
 def ds_verso_pass_url := true
+
+-- Link labels are not prose under Verso either.
+#guard_msgs in
+/-- See [J. Doe's notes](https://example.com/notes) for more. -/
+def ds_verso_pass_link := true
 
 end
 

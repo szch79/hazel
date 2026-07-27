@@ -39,3 +39,18 @@ def versoBadCloser := true
 -- URL in module doc prose: sentence punctuation adjacent to a URL is part
 -- of the URL span, so no doubleSpace warning.
 /-! See https://example.com/spec. Section two has details. -/
+
+-- Reference-style links in a module doc: initials inside the citation
+-- label do not trigger doubleSpace, and the URL definitions are skipped.
+/-!
+# Survey notes
+
+Method comparison following
+[F. Author, G. Reviewer, *A survey of methods*][author00].
+
+## References
+
+* [F. Author, G. Reviewer, *A survey of methods*][author00]
+
+[author00]: https://example.com/survey
+-/
