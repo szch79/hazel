@@ -10,16 +10,19 @@ public meta import Lean.Linter
 /-!
 # Module docstring linter
 
-Checks that every file has a `/-! ... -/` module docstring and that it is the
-first command after imports.  Runs at `eoi` (end of input) so it can see the
-full file structure.
+Checks that every file has a `/-! ... -/` module docstring and that it comes
+right after the imports.  Whole-module `set_option` commands may precede it:
+that is where the stdlib puts them, and `doc.verso` only affects the
+docstring's parsing when set before it.  Runs at `eoi` (end of input) so it
+can see the full file structure.
 -/
 
 meta section
 
 open Lean Elab Command Linter
 
-/-- Require a module docstring (`/-! ... -/`) as the first command after imports. -/
+/-- Require a module docstring (`/-! ... -/`) right after the imports, with
+only `set_option` commands allowed in between. -/
 public register_option linter.hazel.header.moduleDoc : Bool := {
   defValue := false
   descr := "require a module docstring after imports"
@@ -45,8 +48,8 @@ def moduleDocLinter : Lean.Linter where run := withSetOptionIn fun stx => do
     (getMainVersoModuleDocs env).snippets.toArray.map (·.declarationRange)
   -- Parse header to find where imports end
   let fil ← getFileName
-  let (hdrStx, _) ← Parser.parseHeader
-    { inputString := fm.source, fileName := fil, fileMap := fm }
+  let inputCtx : Parser.InputContext := { inputString := fm.source, fileName := fil, fileMap := fm }
+  let (hdrStx, parserState, _) ← Parser.parseHeader inputCtx
   let hdrEndPos := hdrStx.raw.getTailPos?.getD default
   -- Skip re-export files: nothing after imports means nothing to document.
   let afterImports : Substring.Raw :=
@@ -69,9 +72,23 @@ def moduleDocLinter : Lean.Linter where run := withSetOptionIn fun stx => do
     if docStartPos > hdrEndPos then
       let between : Substring.Raw := { str := fm.source, startPos := hdrEndPos, stopPos := docStartPos }
       unless isOnlyWhitespace between.toString do
-        Linter.logLint linter.hazel.header.moduleDoc stx
-          m!"Module docstring should be the first command after imports.  \
-             Other commands appear before `/-! ... -/`."
+        -- Reparse the commands before the doc: `set_option` commands (and
+        -- comments, which are trivia) are allowed there, anything else is a
+        -- placement violation.
+        let pmctx : Parser.ParserModuleContext := { env, options := ← getOptions }
+        let mut ps := parserState
+        let mut msgs : MessageLog := .empty
+        while ps.pos < docStartPos do
+          let (cmd, ps', msgs') := Parser.parseCommand inputCtx pmctx ps msgs
+          ps := ps'
+          msgs := msgs'
+          if cmd.isOfKind ``Parser.Command.eoi then break
+          if cmd.getPos?.getD docStartPos >= docStartPos then break
+          unless cmd.isOfKind ``Parser.Command.set_option do
+            Linter.logLint linter.hazel.header.moduleDoc stx
+              m!"Module docstring should appear right after the imports; only \
+                 `set_option` commands may precede it."
+            break
 
 initialize addLinter moduleDocLinter
 
