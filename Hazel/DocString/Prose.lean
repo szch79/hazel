@@ -16,6 +16,9 @@ Checks on docstring prose content:
 - `linter.hazel.docstring.doubleSpace`: two spaces after sentence-ending punctuation
 - `linter.hazel.docstring.noUnicodeProse`: no non-ASCII outside backtick/math spans
 - `linter.hazel.docstring.capitalStart`: docstring starts with uppercase or backtick
+
+Under `doc.verso`, role headers such as `{lean}` before a code span are also
+treated as non-prose.
 -/
 
 meta section
@@ -149,8 +152,16 @@ def proseLinter : Lean.Linter where run := withSetOptionIn fun stx => do
   unless chkDouble || chkUnicode || chkCapital do return
   if (← MonadState.get).messages.hasErrors then return
   let allowedChars ← allowedUnicodeRef.get
-  let skippers := proseSkippers ++ (← extraSkippersRef.get)
+  let extraSkippers ← extraSkippersRef.get
+  let versoOpts ← getOptions
+  -- Under Verso, `{role}` headers annotate the inline that follows them and
+  -- are not prose; in Markdown, braces are.
+  let skippersFor (isModuleDoc : Bool) : Array SpanSkipper :=
+    proseSkippers ++
+      (if isVersoDoc versoOpts isModuleDoc then #[skipVersoRoleSpan?] else #[]) ++
+      extraSkippers
   -- Check all docstrings (declarations, syntax, macro, etc.)
+  let skippers := skippersFor false
   for docStx in getDocComments stx do
     let some docString := docBodyText? docStx | continue
     if docString.trimAscii.isEmpty then continue
@@ -167,6 +178,7 @@ def proseLinter : Lean.Linter where run := withSetOptionIn fun stx => do
   if stx.isOfKind ``Parser.Command.moduleDoc then
     let some docString := docBodyText? stx | return
     if docString.trimAscii.isEmpty then return
+    let skippers := skippersFor true
     if chkDouble && hasSingleSpaceViolation docString skippers then
       Linter.logLint linter.hazel.docstring.doubleSpace stx
         m!"Use two spaces after sentence-ending punctuation in module docstrings."

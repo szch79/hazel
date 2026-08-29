@@ -236,6 +236,17 @@ Note: This linter can be disabled with `set_option linter.hazel.docstring.capita
 /-- this starts lowercase. -/
 def ds_fail_lowercase := true
 
+-- Without `doc.verso`, braces are ordinary prose: a role header is not
+-- recognized, so this docstring starts with a lowercase letter.
+/--
+warning: Docstrings should start with an uppercase letter.
+
+Note: This linter can be disabled with `set_option linter.hazel.docstring.capitalStart false`
+-/
+#guard_msgs in
+/-- {lean}`1 + 1` is a sum. -/
+def ds_fail_role_without_verso := true
+
 end capitalStart
 
 /-! # multilineFormat -/
@@ -487,6 +498,17 @@ def ds_verso_pass_url := true
 #guard_msgs in
 /-- See [J. Doe's notes](https://example.com/notes) for more. -/
 def ds_verso_pass_link := true
+
+-- A Verso role header before the opening code span is not prose; there is no
+-- capitalization to demand.
+#guard_msgs in
+/-- {lean}`1 + 1` is a sum. -/
+def ds_verso_pass_role_start := true
+
+-- Nor is a role header with arguments.
+#guard_msgs in
+/-- {lean type:="Nat"}`1 + 1` is a sum of type natural numbers. -/
+def ds_verso_pass_role_args_start := true
 
 end
 

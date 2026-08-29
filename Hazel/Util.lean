@@ -147,11 +147,33 @@ public def skipLinkSpan? (chars : Array Char) (i : Nat) : Option Nat := Id.run d
   return some j
 
 /--
+If a Verso role header starts at index `i`, return the index after it;
+otherwise `none`.  A role header is a braced name with arguments, as in
+`{lean}` or `{lean type:="Nat"}`, and Verso only accepts one immediately
+before a delimited inline (a code or math span, a bracketed inline sequence,
+or another role); a literal brace must be escaped.  The inline that follows
+is left to the other skippers, so a docstring opening with a role-annotated
+code span starts with non-prose.  Only meaningful under `doc.verso`: in
+Markdown docstrings, braces are ordinary prose.
+-/
+public def skipVersoRoleSpan? (chars : Array Char) (i : Nat) : Option Nat :=
+  scanDelimited chars i '{' '}'
+
+/--
 The non-prose spans recognized by default: escaped characters, backtick code
 spans, `$`/`$$` math spans, URLs, and markdown links.
 -/
 public def proseSkippers : Array SpanSkipper :=
   #[skipEscape?, skipDelimRun? '`', skipDelimRun? '$', skipUrlSpan?, skipLinkSpan?]
+
+/--
+Whether a docstring at the current command is parsed with Verso syntax.
+Module docstrings follow `doc.verso.module` when it is set explicitly and
+`doc.verso` otherwise; other docstrings follow `doc.verso`.
+-/
+public def isVersoDoc (opts : Options) (isModuleDoc : Bool) : Bool :=
+  if isModuleDoc && opts.contains `doc.verso.module then opts.getBool `doc.verso.module
+  else doc.verso.get opts
 
 /--
 Iterate over prose characters in a docstring, skipping the non-prose spans
