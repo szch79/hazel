@@ -1063,25 +1063,22 @@ Note: This linter can be disabled with `set_option linter.hazel.style.redundantI
 #guard_msgs in
 theorem ri2_fail_nat {n : Nat} (h : n > 0) : n ≥ 1 := h
 
--- Failing at level 2: {l : List α}
-/--
-warning: Implicit binder `l : List α` could be omitted, `autoImplicit` would infer the same type from usage.
-
-Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
--/
+-- Passing at level 2: {l : List α} where `α` is only reachable through `l`.
+-- Removing it would leave a hygienic `α✝` that cannot be passed by name.
 #guard_msgs in
-theorem ri2_fail_list {l : List α} (h : l ≠ []) : l.length > 0 := by
+theorem ri2_pass_list_fresh {l : List α} (h : l ≠ []) : l.length > 0 := by
   cases l with
   | nil => contradiction
   | cons _ _ => simp
 
--- Failing at level 2: {a : α} and {l : List α} (both flagged)
+-- Failing at level 2: {a : α} is redundant; {l : List α} only instead of it,
+-- since removing both would leave a hygienic `α✝`
 /--
 warning: Implicit binder `a : α` could be omitted, `autoImplicit` would infer the same type from usage.
 
 Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
 ---
-warning: Implicit binder `l : List α` could be omitted, `autoImplicit` would infer the same type from usage.
+warning: Implicit binder `l : List α` could be omitted instead of `a`, but not together with it.
 
 Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
 -/
@@ -1104,7 +1101,9 @@ theorem ri2_pass_auto (h : n > 0) : n ≥ 1 := h
 -- Passing at level 2: name shadows something in scope
 namespace ri2_shadow
 def n := 42
--- n resolves to ri2_shadow.n, auto-implicit won't bind it
+-- Without the binder, `n` resolves to `ri2_shadow.n` and the statement changes
+#guard_msgs in
+theorem shadowed {n : Nat} (h : n > 0) : n ≥ 1 := h
 end ri2_shadow
 
 -- Sort binder still gets the universe widening message at level 2
@@ -1174,14 +1173,9 @@ Note: This linter can be disabled with `set_option linter.hazel.style.redundantI
 #guard_msgs in
 theorem ri2_fail_func_as_arg {f : Nat → Nat} (h : List.map f [1] = [2]) : True := trivial
 
--- Failing: f used as argument via Function.Injective
-/--
-warning: Implicit binder `f : Nat → Nat` could be omitted, `autoImplicit` would infer the same type from usage.
-
-Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
--/
+-- Passing: `Function.Injective f` alone would generalize `f` to `α → β`
 #guard_msgs in
-theorem ri2_fail_injective {f : Nat → Nat} (h : Function.Injective f) : True := trivial
+theorem ri2_pass_injective {f : Nat → Nat} (h : Function.Injective f) : True := trivial
 
 -- Failing: f used as argument via @Eq (type annotation constrains it)
 /--
@@ -1237,6 +1231,191 @@ theorem ri2_fail_mixed_dot {φ : RIFoo} (h : φ.val > 0) (g : RIFoo.val φ > 0) 
 -- Passing: numeric projection (also Term.proj) — can't infer
 #guard_msgs in
 theorem ri2_pass_numeric_proj {p : Nat × Nat} (h : p.1 > 0) : p.1 > 0 := h
+
+/-! ### Instances stuck on the binder's type -/
+
+-- Failing: the `GetElem?` collection and index are stuck without their
+-- binders; `n` is inferred from the equation and moves to the front
+/--
+warning: Implicit binder `n : Nat` could be omitted, `autoImplicit` would infer the same type from usage.
+
+Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
+-/
+#guard_msgs in
+theorem ri2_fail_getElem {a : Array Nat} {i : Nat} {n : Nat} (h : a[i]? = some n) : True :=
+  trivial
+
+-- Passing: `BEq` instance is stuck without the binder
+#guard_msgs in
+theorem ri2_pass_beq [BEq α] [ReflBEq α] {a : α} : (a != a) = false := by simp [bne]
+
+-- Passing: notation over a class projection
+class RIEv (L : Type) where
+  ev : L → Nat → Bool
+
+local notation "⟦" φ "⟧" => RIEv.ev φ
+
+#guard_msgs in
+theorem ri2_pass_notation [RIEv L] {φ : L} (h : ⟦φ⟧ 0 = true) : True := trivial
+
+-- Passing: multi-name binder under a class-based relation; removing the node
+-- leaves both sides of `≤` unknown
+structure RIPt where
+  n : Nat
+
+instance : LE RIPt := ⟨fun a b => a.n ≤ b.n⟩
+
+#guard_msgs in
+theorem ri2_pass_pair {p q : RIPt} : p ≤ q ↔ p.n ≤ q.n := .rfl
+
+-- Passing: section instance is pinned by the binder
+structure RIAlg (L : Type) where
+  str : L → L
+
+class RILang (L : Type) where
+  ev : L → Nat
+
+def RIAlg.Correct [RILang L] (A : RIAlg L) : Prop := ∀ x, RILang.ev (A.str x) = 0
+
+def RIAlg.Refines (A : RIAlg L₁) (B : RIAlg L₂) : Prop := A.str = A.str ∧ B.str = B.str
+
+section
+variable [RILang L₂]
+
+#guard_msgs in
+theorem ri2_pass_section_inst {A : RIAlg L₁} {B : RIAlg L₂} (hB : B.Correct) : A.Refines B :=
+  ⟨rfl, rfl⟩
+
+end
+
+/-! ### Removal changes the statement -/
+
+-- Passing: removing `{l : List Nat}` generalizes `Nat`
+#guard_msgs in
+theorem ri2_pass_generalizes {l : List Nat} (h : l.length > 0) : l ≠ [] := by
+  cases l <;> simp_all
+
+-- Passing: an unused proof binder would disappear
+#guard_msgs in
+theorem ri2_pass_unused_proof (n : Nat) {h : n > 0} (x : Fin n) : True := trivial
+
+-- Passing: an auto-bound implicit cannot depend on an explicit binder
+def riMkFin (n : Nat) (h : n > 0) : Fin n := ⟨0, h⟩
+
+#guard_msgs in
+theorem ri2_pass_dependent_proof (n : Nat) {h : n > 0} (hne : n ≠ 1) :
+    riMkFin n h = ⟨0, h⟩ := rfl
+
+-- Failing: both binders are inferred from the conclusion
+/--
+warning: Implicit binder `n : Nat` could be omitted, `autoImplicit` would infer the same type from usage.
+
+Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
+---
+warning: Implicit binder `h : n > 0` could be omitted, `autoImplicit` would infer the same type from usage.
+
+Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
+-/
+#guard_msgs in
+theorem ri2_fail_used_proof {n : Nat} {h : n > 0} (hne : n ≠ 1) : riMkFin n h = ⟨0, h⟩ := rfl
+
+-- Passing: dependent type over a section variable
+structure RITree where
+  n : Nat
+
+def RITree.Pos (t : RITree) := Fin t.n
+
+section
+variable {τ : RITree}
+
+#guard_msgs in
+theorem ri2_pass_section_dep {pos : τ.Pos} (h : pos.val = 0) : True := trivial
+
+end
+
+-- Passing: a dotted use of `π` is not rescued by an atomic use inside the
+-- same failing application
+def RIOrd := Nat
+
+def RIOrd.Below (π : RIOrd) (u : Nat) (s : List Nat) : Prop := u ∈ s
+
+def riJoin (f : List Nat) (_π : RIOrd) (g : List Nat) : List Nat := f ++ g
+
+#guard_msgs in
+theorem ri2_pass_dotted_arg (f g : List Nat) {π : RIOrd} (h₁ : π.Below u f) (h₂ : π.Below u g) :
+    π.Below u (riJoin f π g) := by
+  unfold RIOrd.Below riJoin at *
+  exact List.mem_append_left _ h₁
+
+/-! ### Choices and placement -/
+
+-- Failing: `f` is reported; `θ₁` and `θ₂` can each go instead of it, not with it
+def RIPres (f : L₁ → L₂) (θ₁ : L₁ → V) (θ₂ : L₂ → V) : Prop := ∀ φ, θ₂ (f φ) = θ₁ φ
+
+def RILax [LE V] (f : L₁ → L₂) (θ₁ : L₁ → V) (θ₂ : L₂ → V) : Prop := ∀ φ, θ₂ (f φ) ≤ θ₁ φ
+
+/--
+warning: Implicit binder `f : L₁ → L₂` could be omitted, `autoImplicit` would infer the same type from usage.
+
+Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
+---
+warning: Implicit binder `θ₁ : L₁ → Nat` could be omitted instead of `f`, but not together with it.
+
+Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
+---
+warning: Implicit binder `θ₂ : L₂ → Nat` could be omitted instead of `f`, but not together with it.
+
+Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
+-/
+#guard_msgs in
+theorem ri2_choice {f : L₁ → L₂} {θ₁ : L₁ → Nat} {θ₂ : L₂ → Nat} (h : RIPres f θ₁ θ₂) :
+    RILax f θ₁ θ₂ := fun φ => Nat.le_of_eq (h φ)
+
+-- Failing: `α` is reported with the widening note; `x` alone would get a
+-- fresh type, and together they would lose the name `α`
+/--
+warning: Implicit binder `α : Type u` could be omitted, `autoImplicit` would bind it.  Note: removing may widen the universe level.
+
+Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
+-/
+#guard_msgs in
+theorem ri2_fail_univ.{u} {α : Type u} {x : α} (h : x = x) : True := trivial
+
+-- Failing: a binder declared mid-signature is reported; it moves to the front
+/--
+warning: Implicit binder `m : Nat` could be omitted, `autoImplicit` would infer the same type from usage.
+
+Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
+-/
+#guard_msgs in
+theorem ri2_fail_mid (h : n > 0) {m : Nat} (h2 : m > 0) : n + m > 0 := by omega
+
+-- Failing: re-declaring an in-scope section variable
+section
+variable {f : Nat → Nat}
+
+/--
+warning: Implicit binder `f : Nat → Nat` could be omitted, `autoImplicit` would infer the same type from usage.
+
+Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
+-/
+#guard_msgs in
+theorem ri2_fail_section_var {f : Nat → Nat} (h : f 0 = 0) : True := trivial
+
+end
+
+-- Failing: `example` is examined too
+/--
+warning: Implicit binder `n : Nat` could be omitted, `autoImplicit` would infer the same type from usage.
+
+Note: This linter can be disabled with `set_option linter.hazel.style.redundantImplicit false`
+-/
+#guard_msgs in
+example {n : Nat} (h : n > 0) : n ≥ 1 := h
+
+-- Passing: a `def` without a result type is not examined
+#guard_msgs in
+def ri2_pass_untyped {n : Nat} (x : Fin n) := x
 
 end redundantImplicitL2
 

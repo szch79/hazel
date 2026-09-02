@@ -365,15 +365,21 @@ are not flagged.
 
 #### `linter.hazel.style.redundantImplicit` / `redundantImplicitLevel`
 
-When `autoImplicit` is on, flags explicit implicit binders that auto-implicit
-would introduce automatically.  The `redundantImplicitLevel` option (default
-1) controls the scope:
+When `autoImplicit` is on, flags implicit binders that the declaration does
+not need.  The verdict comes from the elaborator: the header is elaborated
+again without the binder, and the binder is reported only if that succeeds
+and yields the same declaration type, up to universe levels and binder order
+(the auto-bound binder moves to the front of the implicit block) and keeping
+every accessible binder name.  All binders reported for one declaration can
+be removed together; a binder that could be removed only instead of a
+reported one is flagged separately, leaving the choice to the author.
 
-- **Level 1**: only flag `Sort`/`Type` binders (`{α : Type}`).  Warns that
+The `redundantImplicitLevel` option (default 1) controls the scope:
+
+- **Level 1**: only examine `Sort`/`Type` binders (`{α : Type}`).  Warns that
   removing may widen the universe level.
-- **Level 2**: flag all implicit binders (`{n : Nat}`, `{l : List α}`,
-  etc.).  For non-Sort binders, auto-implicit infers the exact same type
-  from usage — no semantic change.
+- **Level 2**: examine all implicit binders (`{n : Nat}`, `{l : List α}`,
+  etc.).
 
 ```lean
 -- Level 1 flags this (Sort binder):

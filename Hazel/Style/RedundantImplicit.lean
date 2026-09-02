@@ -6,28 +6,41 @@ module
 
 public meta import Lean
 public meta import Lean.Linter
-public meta import Hazel.Util
 
 /-!
 # Redundant implicit binder linter
 
-When `autoImplicit` is on, flags explicit implicit binders that auto-implicit
-would have bound automatically.
+When `autoImplicit` is on, flags implicit binders `{x : T}` that the
+declaration does not need: removing them and letting auto-implicit bind the
+name yields the same declaration type.
+
+The verdict comes from the elaborator, not from a heuristic.  The header
+(binders and result type) is elaborated again without the binder, exactly as
+`elabHeaders` does it, and the result is compared with the header elaborated
+as written.  The comparison ignores universe levels and binder order (an
+auto-bound implicit moves to the front of the implicit block), but insists
+that every accessible binder name survives, so that named arguments keep
+working.
+
+Binders are examined in source order, and each candidate is removed together
+with every binder already reported, so removing all reported binders at once
+is known to work.  A binder that can be removed on its own but not together
+with the reported ones is reported as an alternative, leaving the choice to
+the author.
 
 Two levels (controlled by `redundantImplicitLevel`):
 
-- **Level 1** (default): only flag `Sort`/`Type` binders (`{α : Type}`,
-  `{α : Sort u}`).  Conservative — warns that removing may widen the
-  universe level.
+- **Level 1** (default): only examine `Sort`/`Type` binders (`{α : Type}`,
+  `{α : Sort u}`).  Removing such a binder may widen the universe level,
+  which the warning notes.
 
-- **Level 2**: flag all implicit binders (`{n : Nat}`, `{l : List α}`, etc.)
-  that auto-implicit would handle.  Skips binders that surely can't be
-  inferred: dependent forall types and binders used only via dot notation.
+- **Level 2**: examine all implicit binders (`{n : Nat}`, `{l : List α}`,
+  etc.).
 -/
 
 meta section
 
-open Lean Meta Elab Command Linter Server Hazel.Util
+open Lean Meta Elab Command Linter
 
 /-- Flag redundant implicit binders when `autoImplicit` is on. -/
 public register_option linter.hazel.style.redundantImplicit : Bool := {
@@ -43,250 +56,216 @@ public register_option linter.hazel.style.redundantImplicitLevel : Nat := {
 
 namespace Hazel.Style.RedundantImplicit
 
-/-! ## Predicates -/
+/-! ## Header extraction -/
 
-/-- Check if an `Expr` is `Sort _` or `Type _` (any universe level). -/
-private def isSortOrType (e : Expr) : Bool :=
-  e.isSort
+/-- A source implicit binder node `{x y : T}` at index `idx` of the binder list. -/
+private structure SourceBinder where
+  idx : Nat
+  stx : Syntax
+  names : Array Name
 
-/--
-Check if an FVar ever appears in a non-function position in an expression.
-Returns `true` if there is at least one usage where the FVar is NOT the head
-of a function application (e.g., passed as argument to a known function).
+/-- The parts of a declaration header needed to elaborate it again. -/
+private structure Header where
+  /-- The binder nodes of the signature. -/
+  binders : Array Syntax
+  /-- The result type. -/
+  type : Syntax
+  /-- Declaration name, for auxiliary declarations created by the header. -/
+  declName : Name
+  /-- Short declaration name, never auto-bound. -/
+  shortName : Name
+  /-- Universe names declared with the `declId`. -/
+  levelNames : List Name
 
-When a variable only appears as the head of `.app` (function position),
-auto-implicit cannot infer its type — the metavar can't become a `forallE`.
-But if it also appears in argument position, the known function's parameter
-type constrains the metavar, and auto-implicit works.
--/
-private partial def hasNonAppUsage (fvarId : FVarId) : Expr → Bool
-  | .app fn arg =>
-    hasNonAppUsage fvarId arg ||
-    -- If fn head IS our FVar, this is function-position — not a non-app usage.
-    -- But recurse into fn's nested structure for other occurrences.
-    (if fn.getAppFn.isFVar && fn.getAppFn.fvarId! == fvarId
-     then false
-     else hasNonAppUsage fvarId fn)
-  | .fvar id => id == fvarId  -- bare FVar (not applied) = non-app usage
-  | .forallE _ d b _ => hasNonAppUsage fvarId d || hasNonAppUsage fvarId b
-  | .lam _ d b _ => hasNonAppUsage fvarId d || hasNonAppUsage fvarId b
-  | .letE _ t v b _ =>
-    hasNonAppUsage fvarId t || hasNonAppUsage fvarId v ||
-    hasNonAppUsage fvarId b
-  | _ => false
+/-- Declaration kinds whose signature is `binders : type`. -/
+private def headerKinds : Array Name := #[
+  ``Parser.Command.definition, ``Parser.Command.theorem, ``Parser.Command.abbrev,
+  ``Parser.Command.instance, ``Parser.Command.example, ``Parser.Command.opaque,
+  ``Parser.Command.axiom
+]
 
-/-- Check if a `Name` is atomic (single component, no dots or macro scopes). -/
-private def isAtomicName (n : Name) : Bool :=
-  match n with
-  | .str .anonymous _ => true
-  | _ => false
+/-- The `declId` child of a declaration node, if any. -/
+private def getDeclId? (decl : Syntax) : Option Syntax :=
+  decl.getArgs.findSome? fun arg =>
+    if arg.isOfKind ``Parser.Command.declId then some arg
+    else if arg.isOfKind nullKind && arg.getNumArgs == 1 &&
+        arg[0].isOfKind ``Parser.Command.declId then some arg[0]
+    else none
 
 /--
-Check if ALL occurrences of a name in the signature are dot notation bases
-(`Term.proj` child [0]).  If so, auto-implicit can't infer the type — dot
-notation requires the type to be known upfront to resolve the namespace.
-
-Returns `true` if the binder is surely not inferable (only dot notation usage).
-Returns `false` if there is at least one non-dot-notation usage, or if the
-name doesn't appear in the signature at all.
+Extract the header of a declaration, or `none` if the declaration is not of
+a supported kind or has no result type.
 -/
-private def onlyUsedViaDotNotation (sigStx : Syntax) (name : Name) : Bool :=
-  -- Strategy: check if the name appears in the signature as a bare ident
-  -- that is NOT: (a) a binder name declaration, or (b) the base of Term.proj.
-  -- If such a "free" usage exists, auto-implicit can infer the type from it.
-  -- If no free usage exists (all are dot notation or binder names), can't infer.
-  --
-  -- Walk the syntax tree.  At each ident matching `name`, check context:
-  -- - Inside a Term.proj at position [0]? → dot notation, doesn't help inference
-  -- - Inside a binder's name position? → declaration, doesn't help inference
-  -- - Anything else? → constraining usage, auto-implicit can infer
-  --
-  -- Implementation: find all Term.proj bases, then check if there are any
-  -- ident occurrences NOT accounted for by proj bases or binder names.
-  -- Simpler: find if there EXISTS a non-dot, non-binder-name ident.
-  --
-  -- Use findStack? to check each ident's parent context.
-  let hasConstrainingUsage := (sigStx.find? fun s =>
-    -- Is this an ident matching our name?
-    if !s.isIdent || s.getId != name then false
+private def getHeader? (stx : Syntax) : CommandElabM (Option Header) := do
+  let decl := stx[1]
+  unless headerKinds.contains decl.getKind do return none
+  let some sigStx := decl.getArgs.find? fun s =>
+    s.isOfKind ``Parser.Command.declSig || s.isOfKind ``Parser.Command.optDeclSig
+    | return none
+  let (bindersStx, type?) :=
+    if sigStx.isOfKind ``Parser.Command.declSig then
+      let (binders, type) := expandDeclSig sigStx
+      (binders, some type)
     else
-      -- Check: is this ident the [0] child of a Term.proj?
-      -- We can't check parent from child.  Instead, check if this ident
-      -- is NOT inside any Term.proj at position [0].
-      -- Heuristic: if the ident has no position info, skip it.
-      true
-  ).isSome
-  -- This approach can't distinguish dot bases from other usages without parent info.
-  -- Different approach: collect proj bases as a SET of positions, then check
-  -- if all ident positions are in that set (or are binder name positions).
-  let projBasePositions : Array String.Pos.Raw := Id.run do
-    let projs := findAll sigStx fun s =>
-      s.isOfKind ``Parser.Term.proj &&
-      s[0].isIdent && s[0].getId == name
-    let mut positions := #[]
-    for proj in projs do
-      if let some pos := proj[0].getPos? then
-        positions := positions.push pos
-    return positions
-  -- Collect binder name positions
-  let binderNamePositions : Array String.Pos.Raw := Id.run do
-    let binders := findAll sigStx fun s =>
-      s.isOfKind ``Parser.Term.implicitBinder ||
-      s.isOfKind ``Parser.Term.explicitBinder ||
-      s.isOfKind ``Parser.Term.strictImplicitBinder
-    let mut positions := #[]
-    for binder in binders do
-      let names := binder[1]
-      for nameStx in names.getArgs do
-        if nameStx.isIdent && nameStx.getId == name then
-          if let some pos := nameStx.getPos? then
-            positions := positions.push pos
-    return positions
-  -- Now check: does any ident occurrence have a position NOT in either set?
-  let allIdents := findAll sigStx fun s =>
-    s.isIdent && s.getId == name
-  let hasNonDotUsage := allIdents.any fun ident =>
-    match ident.getPos? with
-    | some pos => !projBasePositions.contains pos && !binderNamePositions.contains pos
-    | none => false  -- no position → can't determine, assume dot notation (conservative)
-  -- If there's a non-dot, non-binder-name usage → type IS inferable → return false
-  -- If all usages are dot/binder-name → type NOT inferable → return true
-  if allIdents.isEmpty then false  -- no usages at all
-  else !hasNonDotUsage
+      expandOptDeclSig sigStx
+  let some type := type? | return none
+  let (shortName, levelNames) := match getDeclId? decl with
+    | some declId =>
+      let (shortName, univs) := expandDeclIdCore declId
+      let levelNames :=
+        if univs.isNone then [] else univs[1].getArgs.getEvenElems.toList.map (·.getId)
+      (shortName, levelNames)
+    | none => (`_hazel_header, [])
+  let declName := (← getCurrNamespace) ++ shortName
+  return some { binders := bindersStx.getArgs, type, declName, shortName, levelNames }
+
+/-- Find the source implicit binder nodes `{...}` of a binder list. -/
+private def collectSourceImplicitBinders (binders : Array Syntax) : Array SourceBinder :=
+  Id.run do
+    let mut result := #[]
+    for h : idx in [:binders.size] do
+      let stx := binders[idx]
+      if stx.isOfKind ``Parser.Term.implicitBinder then
+        let names := stx[1].getArgs.filterMap fun id =>
+          if id.isIdent then some id.getId else none
+        result := result.push { idx, stx, names }
+    return result
+
+/-! ## Header elaboration -/
 
 /--
-Check if an implicit binder can safely be removed under `autoImplicit`.
-Returns `true` if the binder is redundant and should be flagged.
+Elaborate `header` with the binder list `binders` under auto-bound implicits,
+the way `elabHeaders` does, and return the resulting declaration type, or
+`none` if elaboration fails.  Every effect (messages, info trees, environment
+changes) is discarded.
 
-Conditions checked:
-1. Binder is implicit (not explicit, not instance)
-2. Name is atomic (no dots or macro scopes)
-3. Name is in the source implicit binders (not auto-generated)
-4. Name doesn't shadow anything in the outer scope
-5. Level gate: level 1 = Sort/Type only, level 2 = all
-6. Not used only via dot notation (can't resolve without type)
+Error recovery stays on deliberately: Lean accepts `(h : l.length > 0) : l ≠ []`
+only because the `l.length` error is recovered as `sorry`, the later atomic `l`
+throws the auto-bound exception, and `withAutoBoundImplicit` restores the
+message log and retries.  Failure is therefore judged by the message log after
+the whole attempt.
 -/
-private def isRedundant
-    (level : Nat)
-    (ldecl : LocalDecl)
-    (srcImplicits : Array (Name × Syntax))
-    (shadowedNames : Array Name)
-    (sigStx : Syntax) : Bool :=
-  -- 1. Must be implicit
-  ldecl.binderInfo == .implicit &&
-  -- 2. Must be atomic name
-  isAtomicName ldecl.userName &&
-  -- 3. Must be in source (not auto-generated by elaborator)
-  srcImplicits.any (·.1 == ldecl.userName) &&
-  -- 4. Must not shadow outer scope (auto-implicit won't bind shadowed names)
-  !shadowedNames.contains ldecl.userName &&
-  -- 5. Level gate
-  (isSortOrType ldecl.type || level ≥ 2) &&
-  -- 6. Not used only via dot notation (auto-implicit can't resolve)
-  (isSortOrType ldecl.type || !onlyUsedViaDotNotation sigStx ldecl.userName)
+private def elabHeader? (sectionVars : Array Expr) (header : Header) (binders : Array Syntax) :
+    TermElabM (Option Expr) := do
+  let s ← Term.saveState
+  try
+    Core.resetMessageLog
+    let type? ← Term.withDeclName header.declName <|
+      Term.withAutoBoundImplicitForbiddenPred (· == header.shortName) <|
+      Term.withAutoBoundImplicit <|
+      Term.withLevelNames (header.levelNames ++ (← Term.getLevelNames)) <|
+      Term.elabBinders binders fun xs => do
+        let type ← Term.elabType header.type
+        Term.synthesizeSyntheticMVarsNoPostponing
+        let xs ← Term.addAutoBoundImplicits xs none
+        let type ← mkForallFVars' xs type
+        let type ← instantiateMVars type
+        if type.hasExprMVar then return none
+        -- Only the section variables that occur belong to the declaration type.
+        let used := sectionVars.filter fun v => type.containsFVar v.fvarId!
+        let type ← mkForallFVars used type
+        return some (← Term.levelMVarToParam type)
+    let failed := (← Core.getMessageLog).hasErrors
+    s.restore (restoreInfo := true)
+    return if failed then none else type?
+  catch ex =>
+    s.restore (restoreInfo := true)
+    if ex.isInterrupt || ex.isRuntime then throw ex
+    return none
 
-/-! ## Source binder collection -/
+/-! ## Comparison -/
 
-/-- Get the declaration name from a command syntax. -/
-private def getDeclName? (stx : Syntax) : Option Name :=
-  let declId? := stx.find? fun s => s.isOfKind ``Parser.Command.declId
-  declId?.bind fun declId =>
-    match declId[0] with
-    | .ident _ _ val _ => some val
+/-- Erase universe levels, so that types can be compared up to universes. -/
+private def eraseLevels (e : Expr) : Expr :=
+  e.replace fun
+    | .sort _ => some (.sort .zero)
+    | .const n _ => some (.const n [])
     | _ => none
 
 /--
-Find the source implicit binder syntax nodes in a declaration signature.
-Returns array of `(binderName, binderSyntax)` pairs for `{...}` binders.
+Whether `variant` is the same declaration type as `base` up to universe
+levels and binder order.  Binders are aligned by binder info and type, in
+the order of `variant`; a binder whose name is accessible in `base` must keep
+that name, since a leftover metavariable turned into a hygienic binder can no
+longer be passed as a named argument.
 -/
-private def collectSourceImplicitBinders (sigStx : Syntax) :
-    Array (Name × Syntax) := Id.run do
-  let binders := sigStx[0]
-  let mut result := #[]
-  for arg in binders.getArgs do
-    if arg.isOfKind ``Parser.Term.implicitBinder then
-      let names := arg[1]
-      for nameStx in names.getArgs do
-        match nameStx with
-        | .ident _ _ val _ => result := result.push (val, arg)
-        | _ => pure ()
-  return result
+private def eqvModuloReorder (base variant : Expr) : MetaM Bool :=
+  forallTelescope base fun xs₁ body₁ => forallTelescope variant fun xs₂ body₂ => do
+    if xs₁.size != xs₂.size then return false
+    let mut variantFVars : Array Expr := #[]
+    let mut baseFVars : Array Expr := #[]
+    let mut unmatched := xs₁
+    for x₂ in xs₂ do
+      let d₂ ← x₂.fvarId!.getDecl
+      let ty₂ := eraseLevels (d₂.type.replaceFVars variantFVars baseFVars)
+      let mut fits := #[]
+      for x₁ in unmatched do
+        let d₁ ← x₁.fvarId!.getDecl
+        if d₁.binderInfo == d₂.binderInfo && eraseLevels d₁.type == ty₂ &&
+            (d₁.userName.hasMacroScopes || d₁.userName == d₂.userName) then
+          fits := fits.push (x₁, d₁.userName == d₂.userName)
+      let some (x₁, _) := fits.find? (·.2) <|> fits[0]? | return false
+      variantFVars := variantFVars.push x₂
+      baseFVars := baseFVars.push x₁
+      unmatched := unmatched.erase x₁
+    return eraseLevels (body₂.replaceFVars variantFVars baseFVars) == eraseLevels body₁
 
 /-! ## Linter -/
+
+/-- Render the names of a binder node, `p q`. -/
+private def namesText (c : SourceBinder) : String :=
+  " ".intercalate (c.names.toList.map toString)
 
 /-- The redundant-implicit linter. -/
 def redundantImplicitLinter : Linter where run := withSetOptionIn fun stx => do
   unless getLinterValue linter.hazel.style.redundantImplicit (← getLinterOptions) do return
   if (← MonadState.get).messages.hasErrors then return
   unless stx.isOfKind ``Parser.Command.declaration do return
-  -- Check if autoImplicit is on
-  let opts ← getOptions
-  unless autoImplicit.get opts do return
-  -- Find the signature
-  let some sigStx := stx.find? fun s =>
-    s.isOfKind ``Parser.Command.declSig ||
-    s.isOfKind ``Parser.Command.optDeclSig
-  | return
-  -- Collect source implicit binders
-  let srcImplicits := collectSourceImplicitBinders sigStx
-  if srcImplicits.isEmpty then return
-  -- Get the declaration from the environment
-  let some declName := getDeclName? stx | return
-  let env ← getEnv
-  let resolvedName? ← try
-    some <$> resolveGlobalConstNoOverload (mkIdent declName)
-  catch _ => pure none
-  let ns ← getCurrNamespace
-  let some ci := resolvedName?.bind env.find?
-    |>.or (env.find? (ns ++ declName))
-    |>.or (env.find? declName)
-  | return
-  -- Pre-check: which implicit binder names resolve in the outer scope?
-  let shadowedNames ← liftTermElabM do
-    let mut shadowed : Array Name := #[]
-    for (name, _) in srcImplicits do
-      let resolves ← try
-        let resolved? ← Term.resolveId? (mkIdent name) (withInfo := false)
-        pure resolved?.isSome
-      catch _ => pure false
-      if resolves then shadowed := shadowed.push name
-    return shadowed
+  unless autoImplicit.get (← getOptions) do return
+  let some header ← getHeader? stx | return
+  let candidates := collectSourceImplicitBinders header.binders
+  if candidates.isEmpty then return
   let level := linter.hazel.style.redundantImplicitLevel.get (← getOptions)
-  -- Walk the elaborated type
-  liftTermElabM do
-    forallTelescope ci.type fun args body => do
-      -- Build the opened type for FVar-based checks: collect all binder
-      -- types and the return type into one expression to search.
-      let mut openedParts : Array Expr := #[]
-      for a in args do
-        openedParts := openedParts.push (← a.fvarId!.getDecl).type
-      openedParts := openedParts.push body
-      for arg in args do
-        let ldecl ← arg.fvarId!.getDecl
-        -- Single predicate: is this binder redundant?
-        unless isRedundant level ldecl srcImplicits shadowedNames sigStx do continue
-        -- Skip binders that only appear in function position (applied to args).
-        -- Auto-implicit can't infer function types from application alone —
-        -- the metavar can't become a forallE.  But if the FVar also appears in
-        -- argument position (to a known function), the type IS constrainable.
-        if !isSortOrType ldecl.type &&
-           !openedParts.any (hasNonAppUsage arg.fvarId!) then
-          continue
-        -- Find the source syntax for the error location
-        let some (_, binderStx) := srcImplicits.find?
-          fun (n, _) => n == ldecl.userName
-        | continue
-        -- Flag with appropriate message
-        let tyFmt ← ppExpr ldecl.type
-        if isSortOrType ldecl.type then
-          Linter.logLint linter.hazel.style.redundantImplicit binderStx
-            m!"Implicit binder `{ldecl.userName} : {tyFmt}` could be omitted, \
+  runTermElabM fun sectionVars => do
+    let some base ← elabHeader? sectionVars header header.binders | return
+    -- Whether each candidate is a `Sort` binder, and its type, for the messages.
+    -- The type is rendered on one line, since it is quoted inline.
+    let info ← forallTelescope base fun xs _ =>
+      candidates.mapM fun c => do
+        let some x ← xs.findM? fun x => return c.names.contains (← x.fvarId!.getUserName)
+          | return none
+        let type := (← x.fvarId!.getDecl).type
+        return some (type.isSort, (← ppExpr type).pretty (width := 10000))
+    -- Elaborate the header without the binders `removed`, and compare.
+    let check (removed : Array SourceBinder) : TermElabM Bool := do
+      let binders := header.binders.zipIdx.filterMap fun (b, i) =>
+        if removed.any (·.idx == i) then none else some b
+      let some variant ← elabHeader? sectionVars header binders | return false
+      eqvModuloReorder base variant
+    let mut reported : Array SourceBinder := #[]
+    for c in candidates, i? in info do
+      let some (isSort, tyFmt) := i? | continue
+      unless isSort || level ≥ 2 do continue
+      let trial := reported.push c
+      if ← check trial then
+        reported := trial
+        if isSort then
+          logLint linter.hazel.style.redundantImplicit c.stx
+            m!"Implicit binder `{namesText c} : {tyFmt}` could be omitted, \
                `autoImplicit` would bind it.  \
                Note: removing may widen the universe level."
         else
-          Linter.logLint linter.hazel.style.redundantImplicit binderStx
-            m!"Implicit binder `{ldecl.userName} : {tyFmt}` could be omitted, \
+          logLint linter.hazel.style.redundantImplicit c.stx
+            m!"Implicit binder `{namesText c} : {tyFmt}` could be omitted, \
                `autoImplicit` would infer the same type from usage."
+      else if !reported.isEmpty then
+        -- Removable on its own, but not together with the reported binders.
+        if ← check #[c] then
+          let others := ", ".intercalate (reported.toList.map fun r => s!"`{namesText r}`")
+          let pronoun := if reported.size == 1 then "it" else "them"
+          logLint linter.hazel.style.redundantImplicit c.stx
+            m!"Implicit binder `{namesText c} : {tyFmt}` could be omitted instead of \
+               {others}, but not together with {pronoun}."
 
 initialize addLinter redundantImplicitLinter
 
