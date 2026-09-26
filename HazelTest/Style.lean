@@ -411,6 +411,221 @@ info: Try this:
 #guard_msgs in
 theorem dn_fail_no_coercion (φ : DnBase) : DnBase.isGood φ → True := fun _ => trivial
 
+/-! ### Receivers that need an expected type -/
+
+-- Passing: `x.f` elaborates `x` without an expected type, so receivers that
+-- need one (`skippedReceiverKindsRef`) are not flagged.
+#guard_msgs in
+def dn_pass_id_run_do (xs : Array Nat) : Nat := Id.run do
+  let mut s := 0
+  for x in xs do
+    s := s + x
+  return s
+
+#guard_msgs in
+def dn_pass_id_run_do_return (b : Bool) : Nat := Id.run do
+  if b then return 1
+  return 0
+
+#guard_msgs in
+def dn_pass_id_run_paren_do : Nat := Id.run (do return 1)
+
+#guard_msgs in
+def dn_pass_anonymous_ctor (n : Nat) (h : n > 0) : Nat := Subtype.val ⟨n, h⟩
+
+#guard_msgs in
+def dn_pass_dot_ident : Bool := Option.isSome (.some 1)
+
+#guard_msgs in
+def dn_pass_num_literal : Nat := Int.natAbs 2
+
+/-- warning: declaration uses `sorry` -/
+#guard_msgs in
+def dn_pass_sorry : Nat := DnBase.toNat sorry
+
+-- Passing: a local bound without a type annotation gets its type from the
+-- call here, which `b.toNat` could not do.
+#guard_msgs in
+theorem dn_pass_untyped_binder {b} (h : DnBase.toNat b = 0) : True := trivial
+
+set_option autoImplicit true in
+#guard_msgs in
+theorem dn_pass_auto_bound (h : DnBase.toNat b = 0) : True := trivial
+
+-- Passing: the rule cannot tell when an untyped binder got its type, so a
+-- `fun` binder is skipped even where `b.toNat` would work.
+#guard_msgs in
+def dn_pass_untyped_fun (bs : List DnBase) : List Nat := bs.map fun b => DnBase.toNat b
+
+/--
+warning: Use dot notation: `b.toNat`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] b.toNat
+-/
+#guard_msgs in
+def dn_fail_typed_fun (bs : List DnBase) : List Nat := bs.map fun (b : DnBase) => DnBase.toNat b
+
+/-! ### Calls not written in prefix form -/
+
+#guard_msgs in
+def dn_pass_pipe_left (xs : List Nat) : Nat := List.length <| xs
+
+#guard_msgs in
+def dn_pass_dollar (xs : List Nat) : Nat := List.length $ xs
+
+#guard_msgs in
+def dn_pass_pipe_right (xs : List Nat) : Nat := xs |> List.length
+
+#guard_msgs in
+def dn_pass_explicit (xs : List Nat) : Nat := @List.length Nat xs
+
+/-! ### Compound receivers -/
+
+-- Failing: each call is reported once, with the receiver as written.
+/--
+warning: Use dot notation: `(Array.push xs n).size`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] (Array.push xs n).size
+---
+warning: Use dot notation: `xs.push n`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] xs.push n
+-/
+#guard_msgs in
+def dn_fail_nested (xs : Array Nat) (n : Nat) : Nat := Array.size (Array.push xs n)
+
+/--
+warning: Use dot notation: `(Array.push xs n : Array Nat).size`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] (Array.push xs n : Array Nat).size
+---
+warning: Use dot notation: `xs.push n`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] xs.push n
+-/
+#guard_msgs in
+def dn_fail_ascription (xs : Array Nat) (n : Nat) : Nat :=
+  Array.size (Array.push xs n : Array Nat)
+
+/--
+warning: Use dot notation: `(List.map f xs).length`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] (List.map f xs).length
+---
+warning: Use dot notation: `xs.map f`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] xs.map f
+-/
+#guard_msgs in
+def dn_fail_map_length (f : Nat → Nat) (xs : List Nat) : Nat := List.length (List.map f xs)
+
+-- Failing: `if` elaborates without an expected type, so it is not skipped by
+-- default.
+/--
+warning: Use dot notation: `(if b then xs else ys).length`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] (if b then xs else ys).length
+-/
+#guard_msgs in
+def dn_fail_if (b : Bool) (xs ys : List Nat) : Nat := List.length (if b then xs else ys)
+
+/-! ### Receiver parameter selection -/
+
+-- Failing: named arguments stay in place.
+/--
+warning: Use dot notation: `xs.foldl (init := 0) (· + ·)`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] xs.foldl (init := 0) (· + ·)
+-/
+#guard_msgs in
+def dn_fail_named_arg (xs : List Nat) : Nat := List.foldl (init := 0) (· + ·) xs
+
+-- Failing: the receiver is the first parameter whose declared type is a
+-- `List`, which for `List.cons` is the tail, whatever the head's type.
+/--
+warning: Use dot notation: `xs.cons x`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] xs.cons x
+-/
+#guard_msgs in
+def dn_fail_cons (x : Nat) (xs : List Nat) : List Nat := List.cons x xs
+
+/--
+warning: Use dot notation: `xss.cons xs`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] xss.cons xs
+-/
+#guard_msgs in
+def dn_fail_cons_list (xs : List Nat) (xss : List (List Nat)) : List (List Nat) :=
+  List.cons xs xss
+
+/-! ### Receiver type unfolding -/
+
+def DnList := List Nat
+
+-- Failing: `x.length` unfolds `DnList` and finds `List.length`.
+/--
+warning: Use dot notation: `x.length`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] x.length
+-/
+#guard_msgs in
+def dn_fail_unfold (x : DnList) : Nat := List.length x
+
+def DnShadowList := List Nat
+def DnShadowList.length (_ : DnShadowList) : Nat := 0
+
+-- Passing: `x.length` would find `DnShadowList.length` before unfolding.
+#guard_msgs in
+def dn_pass_shadowed (x : DnShadowList) : Nat := List.length x
+
+/-! ### Configuring skipped receivers -/
+
+run_cmd Hazel.Style.PreferDotNotation.skippedReceiverKindsRef.modify (·.push ``termIfThenElse)
+
+-- Passing: `if` receivers are skipped once their kind is added.
+#guard_msgs in
+def dn_pass_if_configured (b : Bool) (xs ys : List Nat) : Nat :=
+  List.length (if b then xs else ys)
+
+run_cmd Hazel.Style.PreferDotNotation.skippedReceiverKindsRef.modify (·.erase ``termIfThenElse)
+
 end preferDotNotation
 
 /-! # Prefer Notation -/

@@ -236,6 +236,26 @@ def foo (l : List Nat) : Nat := List.length l
 def foo (l : List Nat) : Nat := l.length
 ```
 
+A call `Ns.f ... x ...` is flagged only when `x.f ...` would elaborate to the
+same term: `f` must be found through the type of `x` as written (before any
+coercion), and `x` must fill the first parameter of that type, which must be
+explicit.  Only calls written in prefix form are checked, not `|>`, `<|`, `$`
+or `@Ns.f`.
+
+`x.f` elaborates `x` without an expected type, so receivers that need one
+(`do`, `by` and `fun` blocks, `⟨..⟩`, `.ctor`, `{ .. }`, `↑x`, `_`, `sorry`,
+numeric literals) are never flagged.  Neither is a local variable bound
+without a type annotation (`{x}` in a signature, an auto-bound implicit,
+`fun x`), since its type may have been inferred from the call itself.  The
+skipped syntax kinds are configurable via `IO.Ref`:
+
+```lean
+-- In your Init.lean: also skip `if` receivers
+meta initialize
+  Hazel.Style.PreferDotNotation.skippedReceiverKindsRef.modify
+    (· ++ #[``termIfThenElse, ``termDepIfThenElse])
+```
+
 #### `linter.hazel.style.preferNotation`
 
 Flags explicit function calls when a registered notation exists.  Works
