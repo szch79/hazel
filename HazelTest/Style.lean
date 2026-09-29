@@ -925,6 +925,113 @@ def fib3 : Nat → Nat
 termination_by n => n
   decreasing_by all_goals omega
 
+-- Passing: a `where` helper owns its `termination_by` and `decreasing_by`
+#guard_msgs in
+def ka_where_helper (n : Nat) : Nat :=
+  go n
+where
+  /-- Counts down to zero. -/
+  go (k : Nat) : Nat :=
+    if h : k = 0 then 0 else go (k - 1)
+  termination_by k
+  decreasing_by omega
+
+-- Passing: an equation-style `where` helper
+#guard_msgs in
+def ka_where_eqns (n : Nat) : Nat :=
+  go n
+where
+  go : Nat → Nat
+    | 0 => 0
+    | k + 1 => go k
+  termination_by k => k
+
+-- Passing: the first of two helpers keeps its `termination_by` under it
+#guard_msgs in
+def ka_where_two (n : Nat) : Nat :=
+  go n + go2 n
+where
+  go (k : Nat) : Nat :=
+    if h : k = 0 then 0 else go (k - 1)
+  termination_by k
+  go2 (k : Nat) : Nat := k
+
+-- Negative: a helper's `termination_by` at the outer declaration's column
+/--
+warning: `termination_by` should align with its declaration (column 2)
+
+Note: This linter can be disabled with `set_option linter.hazel.style.keywordAlign.terminationBy false`
+-/
+#guard_msgs in
+def ka_where_outer (n : Nat) : Nat :=
+  go n
+where
+  go (k : Nat) : Nat :=
+    if h : k = 0 then 0 else go (k - 1)
+termination_by k
+
+-- Passing: the `termination_by` of `let rec` aligns with `let`
+#guard_msgs in
+def ka_let_rec (n : Nat) : Nat :=
+  let rec go (k : Nat) : Nat :=
+    if h : k = 0 then 0 else go (k - 1)
+  termination_by k
+  go n
+
+#guard_msgs in
+def ka_do_let_rec (n : Nat) : IO Nat := do
+  let rec go (k : Nat) : Nat :=
+    if h : k = 0 then 0 else go (k - 1)
+  termination_by k
+  return go n
+
+-- Passing: each member of `mutual` owns its keywords
+#guard_msgs in
+mutual
+  def ka_even : Nat → Bool
+    | 0 => true
+    | n + 1 => ka_odd n
+  termination_by n => n
+  def ka_odd : Nat → Bool
+    | 0 => false
+    | n + 1 => ka_even n
+  termination_by n => n
+end
+
+#guard_msgs in
+mutual
+  inductive KaFst where
+    | a
+  deriving Repr
+  inductive KaSnd where
+    | b
+  deriving Repr
+end
+
+-- Negative: a member's `termination_by` at the `mutual` column
+/--
+warning: `termination_by` should align with its declaration (column 2)
+
+Note: This linter can be disabled with `set_option linter.hazel.style.keywordAlign.terminationBy false`
+-/
+#guard_msgs in
+mutual
+  def ka_even2 : Nat → Bool
+    | 0 => true
+    | n + 1 => ka_odd2 n
+termination_by n => n
+  def ka_odd2 : Nat → Bool
+    | 0 => false
+    | n + 1 => ka_even2 n
+  termination_by n => n
+end
+
+-- Passing: `set_option ... in` on the declaration's line
+#guard_msgs in
+set_option linter.unusedVariables false in def ka_set_option (n : Nat) : Nat :=
+  if h : n = 0 then 0 else ka_set_option (n - 1)
+termination_by n
+
 end keywordAlign
 
 /-! # Section No Indent -/

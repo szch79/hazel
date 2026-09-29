@@ -37,6 +37,19 @@ excludes trailing trivia.
 public def sourceText? (stx : Syntax) : Option String :=
   stx.getSubstring? (withLeading := false) (withTrailing := false) |>.map (·.toString)
 
+/--
+The number of spaces starting the line that holds `pos`, counting no further
+than `pos`.  Reads the line through `FileMap.positions`, so it does not split
+the source.
+-/
+public def lineIndent (fm : FileMap) (pos : String.Pos.Raw) : Nat :=
+  let start := fm.positions[(fm.toPosition pos).line - 1]!
+  ((String.Pos.Raw.extract fm.source start pos).toList.takeWhile (· == ' ')).length
+
+/-- Whether only spaces precede `pos` on its line. -/
+public def firstOnLine (fm : FileMap) (pos : String.Pos.Raw) : Bool :=
+  lineIndent fm pos == (fm.toPosition pos).column
+
 /-! ## Docstring span-aware iteration
 
 Utilities for iterating over prose characters in docstrings.  Non-prose

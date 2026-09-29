@@ -320,7 +320,11 @@ def foo := 1
 #### `linter.hazel.style.keywordAlign.decreasingBy`
 #### `linter.hazel.style.keywordAlign.where`
 
-These keywords must align with their parent declaration.
+These keywords, when they start their own line, must align with the
+declaration they belong to.  A `where` helper or a `let rec` owns its own
+`termination_by` and `decreasing_by`, and inside `mutual` each member owns its
+keywords.  The expected column is the indentation of the line where that
+declaration starts, so the `termination_by` of `let rec go` aligns with `let`.
 
 ```lean
 -- Bad
@@ -332,6 +336,22 @@ inductive MyBool where
 inductive MyBool where
   | t | f
 deriving Repr
+
+-- Bad: this `termination_by` belongs to `go`, not to `count`
+def count (n : Nat) : Nat :=
+  go n
+where
+  go (k : Nat) : Nat :=
+    if h : k = 0 then 0 else go (k - 1)
+termination_by k
+
+-- Good
+def count (n : Nat) : Nat :=
+  go n
+where
+  go (k : Nat) : Nat :=
+    if h : k = 0 then 0 else go (k - 1)
+  termination_by k
 ```
 
 #### `linter.hazel.style.numericProj` / `numericProjDepth`
