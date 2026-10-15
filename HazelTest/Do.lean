@@ -7,7 +7,6 @@ meta import Hazel
 import Std.Tactic.Do
 
 set_option linter.unusedVariables false
-set_option mvcgen.warning false
 
 /-! # strongPostCond -/
 
