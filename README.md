@@ -857,6 +857,23 @@ meta initialize Hazel.Header.ImportRestrict.broadImportCheckRef.set
   fun name => name == `Std || name == `Mathlib
 ```
 
+## Releases
+
+Hazel follows upstream Lean: for each Lean release there is a Hazel tag of
+the same name (e.g. `v4.35.0`, `v4.36.0-rc1`) built on that toolchain.  To
+pin Hazel, use the tag that matches your `lean-toolchain`:
+
+```lean
+require hazel from git "https://github.com/szch79/hazel.git" @ "v4.35.0"
+```
+
+Toolchain bumps go through every upstream release, in the order upstream
+published them, including patch releases of an older line.
+`scripts/bump-toolchain.sh` performs one such bump: it builds and tests the
+next release, then commits, tags and pushes it, and waits for the GitHub
+release before returning.  `scripts/bump-toolchain.sh --list` shows what is
+pending, and the "Pending upstream Lean releases" issue tracks the same list.
+
 ## License
 
 MIT

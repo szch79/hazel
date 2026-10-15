@@ -1,0 +1,48 @@
+name: Pending Lean releases
+
+# Keeps one issue listing the upstream Lean releases Hazel has not bumped to
+# yet, in publish order, and closes it once Hazel has caught up.  The bumps
+# themselves go through scripts/bump-toolchain.sh, one release at a time.
+
+on:
+  schedule:
+    - cron: '0 8 */2 * *'  # Every 2 days at 08:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Open, update or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          title='Pending upstream Lean releases'
+          pending=$(scripts/pending-releases.sh)
+          issue=$(gh issue list --state open --json number,title \
+            --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ -z "$pending" ]; then
+            if [ -n "$issue" ]; then
+              gh issue close "$issue" --comment 'Caught up with upstream.'
+            fi
+            exit 0
+          fi
+          current=$(sed 's/^leanprover\/lean4://' lean-toolchain)
+          body=$(
+            printf "Upstream Lean has published releases after \`%s\`.  " "$current"
+            printf "Bump through them one at a time, in this order, with \`scripts/bump-toolchain.sh\`:\n\n"
+            while IFS=$'\t' read -r tag date; do
+              printf -- "- \`%s\` (published %s)\n" "$tag" "$date"
+            done <<< "$pending"
+          )
+          if [ -n "$issue" ]; then
+            gh issue edit "$issue" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
