@@ -32,8 +32,11 @@ Only calls written in prefix form are checked: pipelines (`|>`, `<|`, `$`),
 expected type, which the `InfoTree` cannot show, so receivers whose syntax
 kind is in `skippedReceiverKindsRef` are never flagged.  By default these are
 the forms that need an expected type, such as `do` blocks and anonymous
-constructors.  For the same reason, a local variable bound without a type
-annotation is never flagged: its type may have been inferred from the call.
+constructors.  A notation that passes the expected type on to its operands,
+such as `^` or `+`, is skipped when those operands are, as listed in
+`receiverOperandsRef`, so `2 ^ k` is skipped like `2`.  For the same reason,
+a local variable bound without a type annotation is never flagged: its type
+may have been inferred from the call.
 -/
 
 meta section
@@ -58,7 +61,8 @@ front of the dot.  The default lists every such form: `do`, `by`, `fun`,
 structure instances, coercion arrows, holes, `sorry`, and numeric literals
 (which default to `Nat`).  Parentheses around a receiver are looked through,
 and an application headed by one of these kinds, such as `.some 1`, is
-skipped too.  Extend in your project's init module:
+skipped too, as is a notation built from them (see `receiverOperandsRef`).
+Extend in your project's init module:
 
 ```
 meta initialize
@@ -72,6 +76,28 @@ public initialize skippedReceiverKindsRef : IO.Ref (Array SyntaxNodeKind) ←
     ``Parser.Term.dotIdent, ``Parser.Term.structInst, ``coeNotation, ``coeFunNotation,
     ``coeSortNotation, ``Parser.Term.hole, ``Parser.Term.syntheticHole, ``Parser.Term.sorry,
     numLitKind, scientificLitKind]
+
+/--
+Notation kinds whose type is decided by some of their operands, each paired
+with the child indices of those operands.  A receiver of such a kind is
+skipped when all of the listed operands are skipped, so `2 ^ k` and `-2` are
+skipped like `2`, while `k + 1` and `(2 : Int) ^ k` are not.  The default
+lists the notations elaborated by `binop%` (both operands), `rightact%` (the
+base of `^`), `leftact%` (the right operand of `•`) and `unop%` (the operand
+of `-x`), which pass the expected type on to those operands.  Extend in your
+project's init module:
+
+```
+meta initialize
+  Hazel.Style.PreferDotNotation.receiverOperandsRef.modify
+    (·.push (``termIfThenElse, #[3, 5]))
+```
+-/
+public initialize receiverOperandsRef : IO.Ref (Array (SyntaxNodeKind × Array Nat)) ←
+  IO.mkRef #[(``«term_+_», #[0, 2]), (``«term_-_», #[0, 2]), (``«term_*_», #[0, 2]),
+    (``«term_/_», #[0, 2]), (``«term_%_», #[0, 2]), (``«term_++_», #[0, 2]),
+    (``«term_|||_», #[0, 2]), (``«term_^^^_», #[0, 2]), (``«term_&&&_», #[0, 2]),
+    (``«term_^_», #[0]), (``«term_•_», #[2]), (``«term-_», #[1])]
 
 /-! ## Syntax -/
 
@@ -115,13 +141,18 @@ private partial def unparen (stx : Syntax) : Syntax :=
   if stx.isOfKind ``Parser.Term.paren then unparen stx[1] else stx
 
 /--
-Whether `recv`, with parentheses stripped, has a kind in `kinds`, or is an
-application whose head has one.
+Whether `recv`, with parentheses stripped, has a kind in `kinds`, is an
+application whose head has one, or has a kind in `operands` whose listed
+operands are all skipped.  An index past the children reaches
+`Syntax.missing`, which is not skipped.
 -/
-private def isSkippedReceiver (kinds : Array SyntaxNodeKind) (recv : Syntax) : Bool :=
+private partial def isSkippedReceiver (kinds : Array SyntaxNodeKind)
+    (operands : Array (SyntaxNodeKind × Array Nat)) (recv : Syntax) : Bool :=
   let recv := unparen recv
   kinds.contains recv.getKind ||
-    recv.isOfKind ``Parser.Term.app && kinds.contains recv[0].getKind
+    recv.isOfKind ``Parser.Term.app && kinds.contains recv[0].getKind ||
+    (operands.find? (·.1 == recv.getKind)).any fun (_, idxs) =>
+      idxs.all fun i => isSkippedReceiver kinds operands recv[i]
 
 /--
 The rewrite of `stx`, the call `call`, to `recv.short rest`, where `rest` is
@@ -241,6 +272,7 @@ def dotNotationLinter : Lean.Linter where run := withSetOptionIn fun _stx => do
     return
   if (← MonadState.get).messages.hasErrors then return
   let skippedKinds ← skippedReceiverKindsRef.get
+  let receiverOperands ← receiverOperandsRef.get
   let trees ← getInfoTrees
   let src := (← getFileMap).source
   let mut termInfos : Array (ContextInfo × TermInfo) := #[]
@@ -272,7 +304,7 @@ def dotNotationLinter : Lean.Linter where run := withSetOptionIn fun _stx => do
       catch _ => return none
       | continue
     let recv := call.positional[idx]!
-    if isSkippedReceiver skippedKinds recv then continue
+    if isSkippedReceiver skippedKinds receiverOperands recv then continue
     let some (recvCtx, recvInfo) := rangeKey recv >>= bySyntax.get? | continue
     let resolves ← liftCoreM do
       try recvInfo.runMetaM recvCtx (receiverResolvesTo recvInfo.expr short fnName)

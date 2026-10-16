@@ -439,6 +439,58 @@ def dn_pass_dot_ident : Bool := Option.isSome (.some 1)
 #guard_msgs in
 def dn_pass_num_literal : Nat := Int.natAbs 2
 
+/-! ### Receivers typed only by numerals -/
+
+-- Passing: the operands that decide the type of `2 ^ k`, `-2` and `1 + 2` are
+-- numerals, which `x.f` would elaborate without the call's expected type.
+#guard_msgs in
+theorem dn_pass_pow_num_base (k m : Nat) : 2 ^ k * m = m * 2 ^ k := by
+  rw [Nat.mul_comm (2 ^ k)]
+
+#guard_msgs in
+theorem dn_pass_pow_num_base_int (k : Nat) : 0 * (2 : Int) ^ k = 0 := Int.zero_mul (2 ^ k)
+
+#guard_msgs in
+theorem dn_pass_neg_num (a : Int) : -2 * a = a * -2 := Int.mul_comm (-2) a
+
+#guard_msgs in
+def dn_pass_num_sum : Nat := Int.natAbs (1 + 2)
+
+-- Failing: a typed operand or an ascription decides the type.
+/--
+warning: Use dot notation: `(k + 1).two_pow_pos`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] (k + 1).two_pow_pos
+-/
+#guard_msgs in
+theorem dn_fail_pow_typed_exp (k : Nat) : 0 < 2 ^ (k + 1) := Nat.two_pow_pos (k + 1)
+
+/--
+warning: Use dot notation: `((2 : Int) ^ k).mul_comm`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] ((2 : Int) ^ k).mul_comm
+-/
+#guard_msgs in
+theorem dn_fail_pow_ascribed_base (k : Nat) (a : Int) : (2 : Int) ^ k * a = a * 2 ^ k := by
+  rw [Int.mul_comm ((2 : Int) ^ k)]
+
+/--
+warning: Use dot notation: `(2 * k).succ`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] (2 * k).succ
+-/
+#guard_msgs in
+def dn_fail_num_times_var (k : Nat) : Nat := Nat.succ (2 * k)
+
 /-- warning: declaration uses `sorry` -/
 #guard_msgs in
 def dn_pass_sorry : Nat := DnBase.toNat sorry
@@ -625,6 +677,30 @@ def dn_pass_if_configured (b : Bool) (xs ys : List Nat) : Nat :=
   List.length (if b then xs else ys)
 
 run_cmd Hazel.Style.PreferDotNotation.skippedReceiverKindsRef.modify (·.erase ``termIfThenElse)
+
+run_cmd
+  Hazel.Style.PreferDotNotation.receiverOperandsRef.modify (·.push (``termIfThenElse, #[3, 5]))
+
+-- Passing: an `if` whose branches are numerals is skipped once its branches
+-- are registered as the operands that decide its type.
+#guard_msgs in
+def dn_pass_if_num_configured (b : Bool) : Nat := Int.natAbs (if b then 1 else 2)
+
+-- Failing: branches with their own types still decide it.
+/--
+warning: Use dot notation: `(if b then xs else ys).length`
+
+Note: This linter can be disabled with `set_option linter.hazel.style.preferDotNotation false`
+---
+info: Try this:
+  [apply] (if b then xs else ys).length
+-/
+#guard_msgs in
+def dn_fail_if_typed_configured (b : Bool) (xs ys : List Nat) : Nat :=
+  List.length (if b then xs else ys)
+
+run_cmd
+  Hazel.Style.PreferDotNotation.receiverOperandsRef.modify (·.filter (·.1 != ``termIfThenElse))
 
 end preferDotNotation
 

@@ -246,14 +246,23 @@ or `@Ns.f`.
 (`do`, `by` and `fun` blocks, `⟨..⟩`, `.ctor`, `{ .. }`, `↑x`, `_`, `sorry`,
 numeric literals) are never flagged.  Neither is a local variable bound
 without a type annotation (`{x}` in a signature, an auto-bound implicit,
-`fun x`), since its type may have been inferred from the call itself.  The
-skipped syntax kinds are configurable via `IO.Ref`:
+`fun x`), since its type may have been inferred from the call itself.  A
+notation that passes the expected type on to its operands (`+`, `-`, `*`,
+`/`, `%`, `++`, `|||`, `^^^`, `&&&`, the base of `^`, the right operand of
+`•`, prefix `-`) is skipped when those operands are, so `2 ^ k` and `-2` are
+skipped but `k + 1` and `(2 : Int) ^ k` are not.  Both tables are
+configurable via `IO.Ref`:
 
 ```lean
 -- In your Init.lean: also skip `if` receivers
 meta initialize
   Hazel.Style.PreferDotNotation.skippedReceiverKindsRef.modify
     (· ++ #[``termIfThenElse, ``termDepIfThenElse])
+
+-- Or skip an `if` only when both branches are skipped (children 3 and 5)
+meta initialize
+  Hazel.Style.PreferDotNotation.receiverOperandsRef.modify
+    (·.push (``termIfThenElse, #[3, 5]))
 ```
 
 #### `linter.hazel.style.preferNotation`
